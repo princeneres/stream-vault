@@ -96,9 +96,641 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 "#;
 
-// TODO(backend-eng): add query methods in an `impl Database` block below.
-// CRUD for libraries/groups/items, get_continue_watching(limit),
-// get_next_item(group_id), search(query), settings get/set, progress upsert.
+// ---- Query layer ----------------------------------------------------------
+
+use chrono::{DateTime, Utc};
+use rusqlite::{params, OptionalExtension, Row};
+
+use crate::models::{
+    Group, Item, ItemWithProgress, Library, LibraryKind, Progress, SearchResults,
+};
+
+fn parse_ts(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|d| d.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now())
+}
+
+fn library_from_row(r: &Row<'_>) -> rusqlite::Result<Library> {
+    let kind_s: String = r.get("kind")?;
+    let kind = LibraryKind::from_str(&kind_s).ok_or_else(|| {
+        rusqlite::Error::InvalidColumnType(
+            0,
+            "kind".to_string(),
+            rusqlite::types::Type::Text,
+        )
+    })?;
+    let created_at_s: String = r.get("created_at")?;
+    let last_scanned_at_s: Option<String> = r.get("last_scanned_at")?;
+    Ok(Library {
+        id: r.get("id")?,
+        name: r.get("name")?,
+        root_path: r.get("root_path")?,
+        kind,
+        created_at: parse_ts(&created_at_s),
+        last_scanned_at: last_scanned_at_s.as_deref().map(parse_ts),
+        available: false,
+    })
+}
+
+fn group_from_row(r: &Row<'_>) -> rusqlite::Result<Group> {
+    Ok(Group {
+        id: r.get("id")?,
+        library_id: r.get("library_id")?,
+        parent_group_id: r.get("parent_group_id")?,
+        title: r.get("title")?,
+        position: r.get("position")?,
+        folder_path: r.get("folder_path")?,
+        poster_path: r.get("poster_path")?,
+    })
+}
+
+fn item_from_row(r: &Row<'_>) -> rusqlite::Result<Item> {
+    Ok(Item {
+        id: r.get("id")?,
+        library_id: r.get("library_id")?,
+        group_id: r.get("group_id")?,
+        title: r.get("title")?,
+        position: r.get("position")?,
+        file_path: r.get("file_path")?,
+        duration_seconds: r.get("duration_seconds")?,
+        thumbnail_path: r.get("thumbnail_path")?,
+        season_number: r.get("season_number")?,
+        episode_number: r.get("episode_number")?,
+    })
+}
+
+fn progress_from_row(r: &Row<'_>) -> rusqlite::Result<Progress> {
+    let ts: String = r.get("watched_at")?;
+    let completed_int: i64 = r.get("completed")?;
+    Ok(Progress {
+        item_id: r.get("item_id")?,
+        position_seconds: r.get("position_seconds")?,
+        completed: completed_int != 0,
+        watched_at: parse_ts(&ts),
+    })
+}
+
+const ITEM_COLS: &str =
+    "id, library_id, group_id, title, position, file_path, duration_seconds, thumbnail_path, season_number, episode_number";
+
+fn qualified_item_cols(table_alias: &str) -> String {
+    ITEM_COLS
+        .split(", ")
+        .map(|c| format!("{table_alias}.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertKind {
+    Inserted,
+    Updated,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UpsertResult {
+    pub id: i64,
+    pub kind: UpsertKind,
+}
+
+impl Database {
+    // -- Libraries ---------------------------------------------------------
+
+    pub fn insert_library(
+        &self,
+        name: &str,
+        root_path: &str,
+        kind: LibraryKind,
+    ) -> Result<Library> {
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO libraries (name, root_path, kind) VALUES (?, ?, ?)",
+                params![name, root_path, kind.as_str()],
+            )?;
+            let id = c.last_insert_rowid();
+            let mut stmt = c.prepare(
+                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries WHERE id = ?",
+            )?;
+            let lib = stmt.query_row([id], library_from_row)?;
+            Ok(lib)
+        })
+    }
+
+    pub fn delete_library_by_id(&self, id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM libraries WHERE id = ?", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn list_libraries_raw(&self) -> Result<Vec<Library>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries ORDER BY id",
+            )?;
+            let rows = stmt.query_map([], library_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get_library_by_id(&self, id: i64) -> Result<Option<Library>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries WHERE id = ?",
+            )?;
+            let lib = stmt.query_row([id], library_from_row).optional()?;
+            Ok(lib)
+        })
+    }
+
+    pub fn update_library_last_scanned(&self, id: i64, ts: DateTime<Utc>) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE libraries SET last_scanned_at = ? WHERE id = ?",
+                params![ts.to_rfc3339(), id],
+            )?;
+            Ok(())
+        })
+    }
+
+    // -- Groups ------------------------------------------------------------
+
+    pub fn list_groups_by_library(&self, library_id: i64) -> Result<Vec<Group>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
+                 FROM groups WHERE library_id = ? ORDER BY position, title",
+            )?;
+            let rows = stmt.query_map([library_id], group_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn list_top_level_groups(&self, library_id: i64) -> Result<Vec<Group>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
+                 FROM groups WHERE library_id = ? AND parent_group_id IS NULL
+                 ORDER BY position, title",
+            )?;
+            let rows = stmt.query_map([library_id], group_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn list_subgroups(&self, parent_group_id: i64) -> Result<Vec<Group>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
+                 FROM groups WHERE parent_group_id = ? ORDER BY position, title",
+            )?;
+            let rows = stmt.query_map([parent_group_id], group_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get_group_by_id(&self, id: i64) -> Result<Option<Group>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
+                 FROM groups WHERE id = ?",
+            )?;
+            let g = stmt.query_row([id], group_from_row).optional()?;
+            Ok(g)
+        })
+    }
+
+    pub fn upsert_group_by_folder_path(
+        &self,
+        library_id: i64,
+        parent_group_id: Option<i64>,
+        title: &str,
+        position: i32,
+        folder_path: &str,
+        poster_path: Option<&str>,
+    ) -> Result<UpsertResult> {
+        self.with_conn(|c| {
+            let existing: Option<(i64, Option<i64>, String, i32, Option<String>)> = c
+                .query_row(
+                    "SELECT id, parent_group_id, title, position, poster_path FROM groups WHERE folder_path = ?",
+                    [folder_path],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            if let Some((id, p_g, p_t, p_pos, p_poster)) = existing {
+                let same = p_g == parent_group_id
+                    && p_t == title
+                    && p_pos == position
+                    && p_poster.as_deref() == poster_path;
+                if same {
+                    return Ok(UpsertResult { id, kind: UpsertKind::Unchanged });
+                }
+                c.execute(
+                    "UPDATE groups SET library_id = ?, parent_group_id = ?, title = ?, position = ?, poster_path = ? WHERE id = ?",
+                    params![library_id, parent_group_id, title, position, poster_path, id],
+                )?;
+                Ok(UpsertResult { id, kind: UpsertKind::Updated })
+            } else {
+                c.execute(
+                    "INSERT INTO groups (library_id, parent_group_id, title, position, folder_path, poster_path) VALUES (?, ?, ?, ?, ?, ?)",
+                    params![library_id, parent_group_id, title, position, folder_path, poster_path],
+                )?;
+                Ok(UpsertResult { id: c.last_insert_rowid(), kind: UpsertKind::Inserted })
+            }
+        })
+    }
+
+    pub fn delete_group_by_id(&self, id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM groups WHERE id = ?", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn update_group_poster(&self, id: i64, poster_path: Option<&str>) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE groups SET poster_path = ? WHERE id = ?",
+                params![poster_path, id],
+            )?;
+            Ok(())
+        })
+    }
+
+    // -- Items -------------------------------------------------------------
+
+    pub fn list_items_by_library(&self, library_id: i64) -> Result<Vec<Item>> {
+        self.with_conn(|c| {
+            let q = format!(
+                "SELECT {ITEM_COLS} FROM items WHERE library_id = ? ORDER BY position, title"
+            );
+            let mut stmt = c.prepare(&q)?;
+            let rows = stmt.query_map([library_id], item_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn list_items_by_group(&self, group_id: i64) -> Result<Vec<Item>> {
+        self.with_conn(|c| {
+            let q = format!(
+                "SELECT {ITEM_COLS} FROM items WHERE group_id = ? ORDER BY position, title"
+            );
+            let mut stmt = c.prepare(&q)?;
+            let rows = stmt.query_map([group_id], item_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn list_top_items_by_library(&self, library_id: i64) -> Result<Vec<Item>> {
+        self.with_conn(|c| {
+            let q = format!(
+                "SELECT {ITEM_COLS} FROM items WHERE library_id = ? AND group_id IS NULL ORDER BY position, title"
+            );
+            let mut stmt = c.prepare(&q)?;
+            let rows = stmt.query_map([library_id], item_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get_item_by_id(&self, id: i64) -> Result<Option<Item>> {
+        self.with_conn(|c| {
+            let q = format!("SELECT {ITEM_COLS} FROM items WHERE id = ?");
+            let mut stmt = c.prepare(&q)?;
+            let it = stmt.query_row([id], item_from_row).optional()?;
+            Ok(it)
+        })
+    }
+
+    pub fn upsert_item_by_file_path(
+        &self,
+        library_id: i64,
+        group_id: Option<i64>,
+        title: &str,
+        position: i32,
+        file_path: &str,
+        duration_seconds: Option<f64>,
+        thumbnail_path: Option<&str>,
+        season_number: Option<i32>,
+        episode_number: Option<i32>,
+    ) -> Result<UpsertResult> {
+        self.with_conn(|c| {
+            let existing: Option<(
+                i64,
+                Option<i64>,
+                String,
+                i32,
+                Option<f64>,
+                Option<String>,
+                Option<i32>,
+                Option<i32>,
+            )> = c
+                .query_row(
+                    "SELECT id, group_id, title, position, duration_seconds, thumbnail_path, season_number, episode_number FROM items WHERE file_path = ?",
+                    [file_path],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+                )
+                .optional()?;
+            if let Some((id, p_g, p_t, p_pos, p_dur, p_thumb, p_s, p_e)) = existing {
+                let same = p_g == group_id
+                    && p_t == title
+                    && p_pos == position
+                    && p_dur == duration_seconds
+                    && p_thumb.as_deref() == thumbnail_path
+                    && p_s == season_number
+                    && p_e == episode_number;
+                if same {
+                    return Ok(UpsertResult { id, kind: UpsertKind::Unchanged });
+                }
+                c.execute(
+                    "UPDATE items SET library_id = ?, group_id = ?, title = ?, position = ?, duration_seconds = ?, thumbnail_path = ?, season_number = ?, episode_number = ? WHERE id = ?",
+                    params![library_id, group_id, title, position, duration_seconds, thumbnail_path, season_number, episode_number, id],
+                )?;
+                Ok(UpsertResult { id, kind: UpsertKind::Updated })
+            } else {
+                c.execute(
+                    "INSERT INTO items (library_id, group_id, title, position, file_path, duration_seconds, thumbnail_path, season_number, episode_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![library_id, group_id, title, position, file_path, duration_seconds, thumbnail_path, season_number, episode_number],
+                )?;
+                Ok(UpsertResult { id: c.last_insert_rowid(), kind: UpsertKind::Inserted })
+            }
+        })
+    }
+
+    pub fn delete_item_by_id(&self, id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM items WHERE id = ?", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn update_item_thumbnail(&self, id: i64, thumb: Option<&str>) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE items SET thumbnail_path = ? WHERE id = ?",
+                params![thumb, id],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn update_item_duration(&self, id: i64, duration_seconds: Option<f64>) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE items SET duration_seconds = ? WHERE id = ?",
+                params![duration_seconds, id],
+            )?;
+            Ok(())
+        })
+    }
+
+    // -- Progress ----------------------------------------------------------
+
+    pub fn get_progress_by_item(&self, item_id: i64) -> Result<Option<Progress>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT item_id, position_seconds, completed, watched_at FROM progress WHERE item_id = ?",
+            )?;
+            let p = stmt.query_row([item_id], progress_from_row).optional()?;
+            Ok(p)
+        })
+    }
+
+    pub fn upsert_progress(
+        &self,
+        item_id: i64,
+        position_seconds: f64,
+        completed: bool,
+    ) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                r#"INSERT INTO progress (item_id, position_seconds, completed, watched_at)
+                   VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                   ON CONFLICT(item_id) DO UPDATE SET
+                       position_seconds = excluded.position_seconds,
+                       completed        = excluded.completed,
+                       watched_at       = excluded.watched_at"#,
+                params![item_id, position_seconds, completed as i64],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Returns items keyed by id with their `Progress` (if any).
+    pub fn map_progress_for_items(
+        &self,
+        item_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, Progress>> {
+        if item_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        self.with_conn(|c| {
+            let placeholders = std::iter::repeat("?")
+                .take(item_ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let q = format!(
+                "SELECT item_id, position_seconds, completed, watched_at FROM progress WHERE item_id IN ({placeholders})"
+            );
+            let mut stmt = c.prepare(&q)?;
+            let params_iter: Vec<&dyn rusqlite::ToSql> =
+                item_ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+            let rows = stmt.query_map(params_iter.as_slice(), progress_from_row)?;
+            let mut out = std::collections::HashMap::new();
+            for r in rows {
+                let p = r?;
+                out.insert(p.item_id, p);
+            }
+            Ok(out)
+        })
+    }
+
+    // -- Continue Watching / Next Item / Search ----------------------------
+
+    pub fn get_continue_watching(&self, limit: u32) -> Result<Vec<ItemWithProgress>> {
+        self.with_conn(|c| {
+            let qual_cols = qualified_item_cols("i");
+            let q = format!(
+                r#"SELECT {qual_cols}, p.position_seconds AS p_pos, p.completed AS p_done, p.watched_at AS p_at
+                   FROM items i JOIN progress p ON p.item_id = i.id
+                   WHERE p.position_seconds > 0 AND p.completed = 0
+                   ORDER BY p.watched_at DESC
+                   LIMIT ?"#,
+            );
+            let mut stmt = c.prepare(&q)?;
+            let rows = stmt.query_map([limit as i64], |r| {
+                let item = item_from_row(r)?;
+                let p_pos: f64 = r.get("p_pos")?;
+                let p_done: i64 = r.get("p_done")?;
+                let p_at_s: String = r.get("p_at")?;
+                let progress = Progress {
+                    item_id: item.id,
+                    position_seconds: p_pos,
+                    completed: p_done != 0,
+                    watched_at: parse_ts(&p_at_s),
+                };
+                Ok(ItemWithProgress {
+                    item,
+                    progress: Some(progress),
+                })
+            })?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get_next_item(&self, group_id: i64) -> Result<Option<Item>> {
+        self.with_conn(|c| {
+            // Recursive CTE walks the group's tree; pick the first item in
+            // `(group.position, item.position)` order whose progress is null
+            // or completed = 0. Fallback: first item if all completed.
+            let qual_cols = qualified_item_cols("i");
+            let q = format!(
+                r#"
+                WITH RECURSIVE
+                  tree(id, position, depth) AS (
+                      SELECT id, position, 0 FROM groups WHERE id = ?
+                      UNION ALL
+                      SELECT g.id, g.position, t.depth + 1
+                        FROM groups g JOIN tree t ON g.parent_group_id = t.id
+                  )
+                SELECT {qual_cols}, COALESCE(p.completed, 0) AS done
+                FROM items i
+                JOIN tree t ON t.id = i.group_id
+                LEFT JOIN progress p ON p.item_id = i.id
+                ORDER BY t.depth, t.position, i.position, i.title
+                "#,
+            );
+            let mut stmt = c.prepare(&q)?;
+            let mut rows = stmt.query([group_id])?;
+            let mut first_item: Option<Item> = None;
+            while let Some(row) = rows.next()? {
+                let it = item_from_row(row)?;
+                let done: i64 = row.get("done")?;
+                if first_item.is_none() {
+                    first_item = Some(it.clone());
+                }
+                if done == 0 {
+                    return Ok(Some(it));
+                }
+            }
+            Ok(first_item)
+        })
+    }
+
+    pub fn search(&self, query: &str, per_kind: u32) -> Result<SearchResults> {
+        self.with_conn(|c| {
+            let pattern = format!("%{query}%");
+            let mut g_stmt = c.prepare(
+                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
+                 FROM groups WHERE title LIKE ? COLLATE NOCASE ORDER BY title LIMIT ?",
+            )?;
+            let groups: Vec<Group> = g_stmt
+                .query_map(params![pattern, per_kind as i64], group_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let q_items = format!(
+                "SELECT {ITEM_COLS} FROM items WHERE title LIKE ? COLLATE NOCASE ORDER BY title LIMIT ?",
+            );
+            let mut i_stmt = c.prepare(&q_items)?;
+            let items: Vec<Item> = i_stmt
+                .query_map(params![pattern, per_kind as i64], item_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
+            drop(g_stmt);
+            drop(i_stmt);
+            let progress_map = if ids.is_empty() {
+                std::collections::HashMap::new()
+            } else {
+                let placeholders =
+                    std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
+                let q = format!(
+                    "SELECT item_id, position_seconds, completed, watched_at FROM progress WHERE item_id IN ({placeholders})"
+                );
+                let mut stmt = c.prepare(&q)?;
+                let params_iter: Vec<&dyn rusqlite::ToSql> =
+                    ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+                let rows = stmt.query_map(params_iter.as_slice(), progress_from_row)?;
+                let mut m = std::collections::HashMap::new();
+                for r in rows {
+                    let p = r?;
+                    m.insert(p.item_id, p);
+                }
+                m
+            };
+            let items_with_progress = items
+                .into_iter()
+                .map(|item| ItemWithProgress {
+                    progress: progress_map.get(&item.id).cloned(),
+                    item,
+                })
+                .collect();
+
+            Ok(SearchResults {
+                groups,
+                items: items_with_progress,
+            })
+        })
+    }
+
+    // -- Settings ----------------------------------------------------------
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        self.with_conn(|c| {
+            let v: Option<String> = c
+                .query_row(
+                    "SELECT value FROM settings WHERE key = ?",
+                    [key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(v)
+        })
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -118,5 +750,138 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    fn fresh() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(&dir.path().join("test.db")).unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn continue_watching_orders_by_watched_at_desc() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L", LibraryKind::Movies).unwrap();
+        let a = db
+            .upsert_item_by_file_path(lib.id, None, "A", 1, "/tmp/L/a.mp4", None, None, None, None)
+            .unwrap();
+        let b = db
+            .upsert_item_by_file_path(lib.id, None, "B", 2, "/tmp/L/b.mp4", None, None, None, None)
+            .unwrap();
+        // older first, then newer — newer should appear first
+        db.upsert_progress(a.id, 10.0, false).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        db.upsert_progress(b.id, 20.0, false).unwrap();
+        let cw = db.get_continue_watching(10).unwrap();
+        assert_eq!(cw.len(), 2);
+        assert_eq!(cw[0].item.id, b.id);
+        assert_eq!(cw[1].item.id, a.id);
+    }
+
+    #[test]
+    fn continue_watching_excludes_completed_and_zero() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L2", LibraryKind::Movies).unwrap();
+        let a = db
+            .upsert_item_by_file_path(lib.id, None, "A", 1, "/tmp/L2/a.mp4", None, None, None, None)
+            .unwrap();
+        let b = db
+            .upsert_item_by_file_path(lib.id, None, "B", 2, "/tmp/L2/b.mp4", None, None, None, None)
+            .unwrap();
+        let c = db
+            .upsert_item_by_file_path(lib.id, None, "C", 3, "/tmp/L2/c.mp4", None, None, None, None)
+            .unwrap();
+        db.upsert_progress(a.id, 0.0, false).unwrap(); // pos 0 → exclude
+        db.upsert_progress(b.id, 100.0, true).unwrap(); // completed → exclude
+        db.upsert_progress(c.id, 100.0, false).unwrap(); // include
+        let cw = db.get_continue_watching(10).unwrap();
+        assert_eq!(cw.len(), 1);
+        assert_eq!(cw[0].item.id, c.id);
+    }
+
+    #[test]
+    fn next_item_returns_first_incomplete() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L3", LibraryKind::Series).unwrap();
+        let g = db
+            .upsert_group_by_folder_path(lib.id, None, "S", 1, "/tmp/L3/S", None)
+            .unwrap();
+        let i1 = db
+            .upsert_item_by_file_path(lib.id, Some(g.id), "E1", 1, "/tmp/L3/S/e1.mp4", None, None, None, None)
+            .unwrap();
+        let i2 = db
+            .upsert_item_by_file_path(lib.id, Some(g.id), "E2", 2, "/tmp/L3/S/e2.mp4", None, None, None, None)
+            .unwrap();
+        db.upsert_progress(i1.id, 100.0, true).unwrap();
+        let next = db.get_next_item(g.id).unwrap();
+        assert_eq!(next.map(|i| i.id), Some(i2.id));
+    }
+
+    #[test]
+    fn next_item_falls_back_when_all_completed() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L4", LibraryKind::Series).unwrap();
+        let g = db
+            .upsert_group_by_folder_path(lib.id, None, "S", 1, "/tmp/L4/S", None)
+            .unwrap();
+        let i1 = db
+            .upsert_item_by_file_path(lib.id, Some(g.id), "E1", 1, "/tmp/L4/S/e1.mp4", None, None, None, None)
+            .unwrap();
+        let i2 = db
+            .upsert_item_by_file_path(lib.id, Some(g.id), "E2", 2, "/tmp/L4/S/e2.mp4", None, None, None, None)
+            .unwrap();
+        db.upsert_progress(i1.id, 100.0, true).unwrap();
+        db.upsert_progress(i2.id, 100.0, true).unwrap();
+        let next = db.get_next_item(g.id).unwrap();
+        assert_eq!(next.map(|i| i.id), Some(i1.id));
+    }
+
+    #[test]
+    fn next_item_walks_subgroups() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L5", LibraryKind::Courses).unwrap();
+        let parent = db
+            .upsert_group_by_folder_path(lib.id, None, "Course", 1, "/tmp/L5/c", None)
+            .unwrap();
+        let m1 = db
+            .upsert_group_by_folder_path(lib.id, Some(parent.id), "M1", 1, "/tmp/L5/c/m1", None)
+            .unwrap();
+        let m2 = db
+            .upsert_group_by_folder_path(lib.id, Some(parent.id), "M2", 2, "/tmp/L5/c/m2", None)
+            .unwrap();
+        let _v1 = db
+            .upsert_item_by_file_path(lib.id, Some(m1.id), "V1", 1, "/tmp/L5/c/m1/v1.mp4", None, None, None, None)
+            .unwrap();
+        let v2 = db
+            .upsert_item_by_file_path(lib.id, Some(m2.id), "V2", 1, "/tmp/L5/c/m2/v2.mp4", None, None, None, None)
+            .unwrap();
+        db.upsert_progress(_v1.id, 100.0, true).unwrap();
+        let next = db.get_next_item(parent.id).unwrap();
+        assert_eq!(next.map(|i| i.id), Some(v2.id));
+    }
+
+    #[test]
+    fn search_finds_groups_and_items_case_insensitive() {
+        let (_d, db) = fresh();
+        let lib = db.insert_library("L", "/tmp/L6", LibraryKind::Generic).unwrap();
+        let _g = db
+            .upsert_group_by_folder_path(lib.id, None, "Rust Course", 1, "/tmp/L6/rust", None)
+            .unwrap();
+        let _i = db
+            .upsert_item_by_file_path(lib.id, None, "Rust Lesson", 1, "/tmp/L6/x.mp4", None, None, None, None)
+            .unwrap();
+        let r = db.search("RUST", 20).unwrap();
+        assert_eq!(r.groups.len(), 1);
+        assert_eq!(r.items.len(), 1);
+    }
+
+    #[test]
+    fn settings_roundtrip() {
+        let (_d, db) = fresh();
+        assert!(db.get_setting("missing").unwrap().is_none());
+        db.set_setting("k", "v1").unwrap();
+        assert_eq!(db.get_setting("k").unwrap().as_deref(), Some("v1"));
+        db.set_setting("k", "v2").unwrap();
+        assert_eq!(db.get_setting("k").unwrap().as_deref(), Some("v2"));
     }
 }
