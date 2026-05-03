@@ -3144,6 +3144,8 @@ dependencies = [
  "chrono",
  "env_logger",
  "log",
+ "once_cell",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3153,6 +3155,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "walkdir",
 ]
 
 [[package]]
