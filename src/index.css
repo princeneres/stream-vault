@@ -1,15 +1,59 @@
 @import "tailwindcss";
 
 @theme {
+  /* Base surfaces */
   --color-bg: #0b0d10;
   --color-surface: #14171c;
   --color-surface-raised: #1c2027;
+  --color-surface-hover: #232832;
+  --color-overlay: rgba(8, 10, 13, 0.72);
+
+  /* Borders */
   --color-border-subtle: #262b33;
+  --color-border-strong: #353b46;
+
+  /* Text */
   --color-text-primary: #e6e8eb;
   --color-text-secondary: #a8adb6;
   --color-text-muted: #6c7280;
-  --color-accent: #6e8efb;
-  --color-accent-hover: #8aa2fc;
+  --color-text-inverse: #0b0d10;
+
+  /* Accent — desaturated indigo, dark-friendly */
+  --color-accent: #7c93f5;
+  --color-accent-hover: #94a7f8;
+  --color-accent-active: #6478e2;
+  --color-accent-soft: rgba(124, 147, 245, 0.16);
+
+  /* Semantic */
+  --color-success: #4ade80;
+  --color-success-soft: rgba(74, 222, 128, 0.16);
+  --color-warning: #f5b86e;
+  --color-danger: #f47b7b;
+  --color-danger-hover: #f69595;
+  --color-danger-soft: rgba(244, 123, 123, 0.16);
+
+  /* Radii */
+  --radius-pill: 9999px;
+  --radius-card: 0.75rem;
+  --radius-card-lg: 1rem;
+  --radius-control: 0.5rem;
+  --radius-sm: 0.375rem;
+
+  /* Shadows */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 12px 28px -8px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 24px 60px -12px rgba(0, 0, 0, 0.7), 0 8px 20px -6px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  /* Sidebar width */
+  --layout-sidebar: 240px;
 }
 
 html, body, #root {
@@ -21,4 +65,31 @@ body {
   background: var(--color-bg);
   color: var(--color-text-primary);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar polish for dark theme */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Hide scrollbar utility for horizontal card rows */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
 }
