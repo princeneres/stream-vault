@@ -24,6 +24,7 @@ pub fn run() {
             let db = Database::new(&db_path)
                 .expect("failed to open/migrate streamvault.db");
             app.manage(db);
+            app.manage(std::sync::Arc::new(crate::mpv::PlaybackState::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

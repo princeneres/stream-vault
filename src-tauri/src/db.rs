@@ -5,13 +5,17 @@
 // without flagging the orchestrator.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+/// Cheaply cloneable handle to the SQLite connection. Clones share the
+/// underlying connection through an `Arc<Mutex<_>>`, so it's safe to move
+/// into background async tasks.
+#[derive(Clone)]
 pub struct Database {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
@@ -26,7 +30,9 @@ impl Database {
             .with_context(|| format!("opening sqlite at {path:?}"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Arc::new(Mutex::new(conn)),
+        };
         db.migrate()?;
         Ok(db)
     }
