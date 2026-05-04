@@ -91,26 +91,29 @@ pub fn scan_library(
 }
 
 /// ffprobe duration + ffmpeg thumbnail for items missing them, then group
-/// posters. Best-effort: missing ffmpeg/ffprobe just logs and skips.
+/// posters. Best-effort: missing ffmpeg/ffprobe is logged at warn level for
+/// the first failure (so the user sees it once) and at debug afterwards.
+/// Emits a `library-artwork` event every 8 artworks landed so the UI can
+/// repaint progressively for big libraries.
 fn generate_artwork(db: &Database, app: &AppHandle, library_id: i64) -> Result<(), String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    const EMIT_EVERY: u32 = 8;
+
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let thumb_dir = data_dir.join("thumbnails");
     let poster_dir = data_dir.join("posters");
 
     let items = db.list_items_by_library(library_id).map_err(cmd_err)?;
-    let mut artwork_dirty = false;
+    let mut emit = ArtworkEmitter::new(app, library_id, EMIT_EVERY);
+    let mut warned_ffmpeg = false;
+    let mut warned_ffprobe = false;
 
     for item in &items {
         let needs_duration = item.duration_seconds.is_none();
-        let needs_thumb = item.thumbnail_path.is_none()
-            || !item
-                .thumbnail_path
-                .as_deref()
-                .map(|p| Path::new(p).is_file())
-                .unwrap_or(false);
+        let needs_thumb = item
+            .thumbnail_path
+            .as_deref()
+            .map(|p| !Path::new(p).is_file())
+            .unwrap_or(true);
         if !needs_duration && !needs_thumb {
             continue;
         }
@@ -120,7 +123,14 @@ fn generate_artwork(db: &Database, app: &AppHandle, library_id: i64) -> Result<(
                 Ok(d) => {
                     let _ = db.update_item_duration(item.id, Some(d));
                 }
-                Err(e) => log::debug!("probe_duration {}: {e}", item.id),
+                Err(e) => {
+                    if !warned_ffprobe {
+                        log::warn!("probe_duration item {}: {e}", item.id);
+                        warned_ffprobe = true;
+                    } else {
+                        log::debug!("probe_duration item {}: {e}", item.id);
+                    }
+                }
             }
         }
 
@@ -133,9 +143,16 @@ fn generate_artwork(db: &Database, app: &AppHandle, library_id: i64) -> Result<(
                 Ok(path) => {
                     let p = path.to_string_lossy().to_string();
                     let _ = db.update_item_thumbnail(item.id, Some(&p));
-                    artwork_dirty = true;
+                    emit.tick();
                 }
-                Err(e) => log::debug!("thumbnail {}: {e}", item.id),
+                Err(e) => {
+                    if !warned_ffmpeg {
+                        log::warn!("thumbnail item {}: {e}", item.id);
+                        warned_ffmpeg = true;
+                    } else {
+                        log::debug!("thumbnail item {}: {e}", item.id);
+                    }
+                }
             }
         }
     }
@@ -155,19 +172,53 @@ fn generate_artwork(db: &Database, app: &AppHandle, library_id: i64) -> Result<(
             Ok(path) => {
                 let p = path.to_string_lossy().to_string();
                 let _ = db.update_group_poster(group.id, Some(&p));
-                artwork_dirty = true;
+                emit.tick();
             }
-            Err(e) => log::debug!("poster {}: {e}", group.id),
+            Err(e) => log::debug!("poster group {}: {e}", group.id),
         }
     }
 
-    if artwork_dirty {
-        let _ = app.emit(
+    emit.flush();
+    Ok(())
+}
+
+struct ArtworkEmitter<'a> {
+    app: &'a AppHandle,
+    library_id: i64,
+    every: u32,
+    pending: u32,
+    total: u32,
+}
+
+impl<'a> ArtworkEmitter<'a> {
+    fn new(app: &'a AppHandle, library_id: i64, every: u32) -> Self {
+        Self {
+            app,
+            library_id,
+            every,
+            pending: 0,
+            total: 0,
+        }
+    }
+    fn tick(&mut self) {
+        self.pending += 1;
+        self.total += 1;
+        if self.pending >= self.every {
+            self.emit();
+        }
+    }
+    fn flush(&mut self) {
+        if self.total > 0 {
+            self.emit();
+        }
+    }
+    fn emit(&mut self) {
+        self.pending = 0;
+        let _ = self.app.emit(
             "library-artwork",
-            serde_json::json!({ "libraryId": library_id }),
+            serde_json::json!({ "libraryId": self.library_id }),
         );
     }
-    Ok(())
 }
 
 // ---- Reads (Backend Engineer) ---------------------------------------------

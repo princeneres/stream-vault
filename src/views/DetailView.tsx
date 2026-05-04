@@ -52,12 +52,20 @@ function ItemGrid({ items }: { items: ItemWithProgress[] }) {
   );
 }
 
-function SubgroupSection({ group }: { group: Group }) {
-  const [open, setOpen] = useState(true);
+function SubgroupSection({
+  group,
+  depth = 0,
+  refreshTick,
+}: {
+  group: Group;
+  depth?: number;
+  refreshTick: number;
+}) {
+  const [open, setOpen] = useState(depth === 0);
   const [detail, setDetail] = useState<GroupDetail | null>(null);
 
   useEffect(() => {
-    if (!open || detail) return;
+    if (!open) return;
     let cancelled = false;
     (async () => {
       try {
@@ -70,7 +78,12 @@ function SubgroupSection({ group }: { group: Group }) {
     return () => {
       cancelled = true;
     };
-  }, [open, detail, group.id]);
+  }, [open, group.id, refreshTick]);
+
+  const isEmpty =
+    detail !== null &&
+    detail.items.length === 0 &&
+    detail.subgroups.length === 0;
 
   return (
     <section className="space-y-3">
@@ -81,14 +94,34 @@ function SubgroupSection({ group }: { group: Group }) {
       >
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         <span>{group.title}</span>
+        {detail && detail.items.length > 0 ? (
+          <span className="text-xs font-normal text-(--color-text-secondary)">
+            {detail.items.length} items
+          </span>
+        ) : null}
       </button>
       {open ? (
         detail ? (
-          detail.items.length > 0 ? (
-            <ItemGrid items={detail.items} />
-          ) : (
-            <p className="text-sm text-(--color-text-secondary)">No items.</p>
-          )
+          <div
+            className={
+              depth > 0
+                ? "space-y-6 border-l border-(--color-border) pl-4"
+                : "space-y-6"
+            }
+          >
+            {detail.items.length > 0 ? <ItemGrid items={detail.items} /> : null}
+            {detail.subgroups.map((sg) => (
+              <SubgroupSection
+                key={sg.id}
+                group={sg}
+                depth={depth + 1}
+                refreshTick={refreshTick}
+              />
+            ))}
+            {isEmpty ? (
+              <p className="text-sm text-(--color-text-secondary)">No items.</p>
+            ) : null}
+          </div>
         ) : (
           <p className="text-sm text-(--color-text-muted)">Loading…</p>
         )
@@ -193,7 +226,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
       ) : null}
 
       {subgroups.map((sg) => (
-        <SubgroupSection key={sg.id} group={sg} />
+        <SubgroupSection key={sg.id} group={sg} refreshTick={progressTick} />
       ))}
 
       {items.length === 0 && subgroups.length === 0 ? (
