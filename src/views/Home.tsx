@@ -172,6 +172,8 @@ export default function Home({
                   title={group.title}
                   poster={thumbSrc(group.posterPath)}
                   kind={lib.kind}
+                  totalCount={group.itemCount}
+                  completedCount={group.completedCount}
                   onClick={() => onOpenGroup(group.id)}
                 />
               </div>

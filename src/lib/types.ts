@@ -28,6 +28,10 @@ export interface Group {
   position: number;
   folderPath: string;
   posterPath: string | null;
+  /** Total leaf items in this group's subtree (self + all descendants). */
+  itemCount: number;
+  /** Items in this group's subtree whose progress is completed. */
+  completedCount: number;
 }
 
 export interface Item {

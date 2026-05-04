@@ -152,6 +152,8 @@ export default function LibraryView({
                 title={group.title}
                 poster={thumbSrc(group.posterPath)}
                 kind={library.kind}
+                totalCount={group.itemCount}
+                completedCount={group.completedCount}
                 onClick={() => onOpenGroup(group.id)}
               />
             ))}

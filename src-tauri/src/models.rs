@@ -64,6 +64,10 @@ pub struct Group {
     pub position: i32,
     pub folder_path: String,
     pub poster_path: Option<String>,
+    /// Total leaf items in this group's subtree (self + all descendants).
+    pub item_count: i32,
+    /// Items in this group's subtree whose progress is `completed = 1`.
+    pub completed_count: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

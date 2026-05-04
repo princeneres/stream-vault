@@ -137,6 +137,8 @@ mod tests {
             position: 0,
             folder_path: "/tmp/no-such-dir-streamvault".to_string(),
             poster_path: None,
+            item_count: 0,
+            completed_count: 0,
         }
     }
 

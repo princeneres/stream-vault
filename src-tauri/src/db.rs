@@ -148,8 +148,36 @@ fn group_from_row(r: &Row<'_>) -> rusqlite::Result<Group> {
         position: r.get("position")?,
         folder_path: r.get("folder_path")?,
         poster_path: r.get("poster_path")?,
+        item_count: r.get("item_count")?,
+        completed_count: r.get("completed_count")?,
     })
 }
+
+/// SELECT clause that returns every `Group` field plus the recursive
+/// `item_count` and `completed_count` aggregates over the group's subtree.
+/// Use as the `<select>` in queries shaped like `<select> FROM groups g WHERE ...`.
+const GROUP_SELECT_WITH_AGGREGATES: &str = "
+    WITH RECURSIVE descendants(root, id) AS (
+        SELECT id, id FROM groups
+        UNION ALL
+        SELECT d.root, child.id
+        FROM groups child JOIN descendants d ON child.parent_group_id = d.id
+    ),
+    aggregates AS (
+        SELECT d.root AS group_id,
+               COUNT(items.id) AS item_count,
+               COALESCE(SUM(CASE WHEN progress.completed = 1 THEN 1 ELSE 0 END), 0) AS completed_count
+        FROM descendants d
+        LEFT JOIN items ON items.group_id = d.id
+        LEFT JOIN progress ON progress.item_id = items.id
+        GROUP BY d.root
+    )
+    SELECT g.id, g.library_id, g.parent_group_id, g.title, g.position,
+           g.folder_path, g.poster_path,
+           COALESCE(a.item_count, 0) AS item_count,
+           COALESCE(a.completed_count, 0) AS completed_count
+    FROM groups g
+    LEFT JOIN aggregates a ON a.group_id = g.id";
 
 fn item_from_row(r: &Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -269,10 +297,11 @@ impl Database {
 
     pub fn list_groups_by_library(&self, library_id: i64) -> Result<Vec<Group>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare(
-                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
-                 FROM groups WHERE library_id = ? ORDER BY position, title",
-            )?;
+            let sql = format!(
+                "{GROUP_SELECT_WITH_AGGREGATES}
+                 WHERE g.library_id = ? ORDER BY g.position, g.title"
+            );
+            let mut stmt = c.prepare(&sql)?;
             let rows = stmt.query_map([library_id], group_from_row)?;
             let mut out = Vec::new();
             for r in rows {
@@ -284,11 +313,12 @@ impl Database {
 
     pub fn list_top_level_groups(&self, library_id: i64) -> Result<Vec<Group>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare(
-                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
-                 FROM groups WHERE library_id = ? AND parent_group_id IS NULL
-                 ORDER BY position, title",
-            )?;
+            let sql = format!(
+                "{GROUP_SELECT_WITH_AGGREGATES}
+                 WHERE g.library_id = ? AND g.parent_group_id IS NULL
+                 ORDER BY g.position, g.title"
+            );
+            let mut stmt = c.prepare(&sql)?;
             let rows = stmt.query_map([library_id], group_from_row)?;
             let mut out = Vec::new();
             for r in rows {
@@ -300,10 +330,11 @@ impl Database {
 
     pub fn list_subgroups(&self, parent_group_id: i64) -> Result<Vec<Group>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare(
-                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
-                 FROM groups WHERE parent_group_id = ? ORDER BY position, title",
-            )?;
+            let sql = format!(
+                "{GROUP_SELECT_WITH_AGGREGATES}
+                 WHERE g.parent_group_id = ? ORDER BY g.position, g.title"
+            );
+            let mut stmt = c.prepare(&sql)?;
             let rows = stmt.query_map([parent_group_id], group_from_row)?;
             let mut out = Vec::new();
             for r in rows {
@@ -315,10 +346,8 @@ impl Database {
 
     pub fn get_group_by_id(&self, id: i64) -> Result<Option<Group>> {
         self.with_conn(|c| {
-            let mut stmt = c.prepare(
-                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
-                 FROM groups WHERE id = ?",
-            )?;
+            let sql = format!("{GROUP_SELECT_WITH_AGGREGATES} WHERE g.id = ?");
+            let mut stmt = c.prepare(&sql)?;
             let g = stmt.query_row([id], group_from_row).optional()?;
             Ok(g)
         })
@@ -659,10 +688,11 @@ impl Database {
     pub fn search(&self, query: &str, per_kind: u32) -> Result<SearchResults> {
         self.with_conn(|c| {
             let pattern = format!("%{query}%");
-            let mut g_stmt = c.prepare(
-                "SELECT id, library_id, parent_group_id, title, position, folder_path, poster_path
-                 FROM groups WHERE title LIKE ? COLLATE NOCASE ORDER BY title LIMIT ?",
-            )?;
+            let g_sql = format!(
+                "{GROUP_SELECT_WITH_AGGREGATES}
+                 WHERE g.title LIKE ? COLLATE NOCASE ORDER BY g.title LIMIT ?"
+            );
+            let mut g_stmt = c.prepare(&g_sql)?;
             let groups: Vec<Group> = g_stmt
                 .query_map(params![pattern, per_kind as i64], group_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -879,6 +909,53 @@ mod tests {
         let r = db.search("RUST", 20).unwrap();
         assert_eq!(r.groups.len(), 1);
         assert_eq!(r.items.len(), 1);
+    }
+
+    #[test]
+    fn group_aggregates_count_descendant_items_and_completed() {
+        let (_d, db) = fresh();
+        let lib = db
+            .insert_library("L", "/tmp/L7", LibraryKind::Courses)
+            .unwrap();
+        let parent = db
+            .upsert_group_by_folder_path(lib.id, None, "Course", 1, "/tmp/L7/c", None)
+            .unwrap();
+        let m1 = db
+            .upsert_group_by_folder_path(lib.id, Some(parent.id), "M1", 1, "/tmp/L7/c/m1", None)
+            .unwrap();
+        let m2 = db
+            .upsert_group_by_folder_path(lib.id, Some(parent.id), "M2", 2, "/tmp/L7/c/m2", None)
+            .unwrap();
+        let v1 = db
+            .upsert_item_by_file_path(lib.id, Some(m1.id), "V1", 1, "/tmp/L7/c/m1/v1.mp4", None, None, None, None)
+            .unwrap();
+        let _v2 = db
+            .upsert_item_by_file_path(lib.id, Some(m1.id), "V2", 2, "/tmp/L7/c/m1/v2.mp4", None, None, None, None)
+            .unwrap();
+        let v3 = db
+            .upsert_item_by_file_path(lib.id, Some(m2.id), "V3", 1, "/tmp/L7/c/m2/v3.mp4", None, None, None, None)
+            .unwrap();
+
+        db.upsert_progress(v1.id, 100.0, true).unwrap();
+        db.upsert_progress(v3.id, 50.0, false).unwrap();
+
+        let top = db.list_top_level_groups(lib.id).unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].id, parent.id);
+        assert_eq!(top[0].item_count, 3);
+        assert_eq!(top[0].completed_count, 1);
+
+        let subs = db.list_subgroups(parent.id).unwrap();
+        let m1_row = subs.iter().find(|g| g.id == m1.id).unwrap();
+        let m2_row = subs.iter().find(|g| g.id == m2.id).unwrap();
+        assert_eq!(m1_row.item_count, 2);
+        assert_eq!(m1_row.completed_count, 1);
+        assert_eq!(m2_row.item_count, 1);
+        assert_eq!(m2_row.completed_count, 0);
+
+        let one = db.get_group_by_id(parent.id).unwrap().unwrap();
+        assert_eq!(one.item_count, 3);
+        assert_eq!(one.completed_count, 1);
     }
 
     #[test]
