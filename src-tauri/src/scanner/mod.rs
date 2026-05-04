@@ -436,6 +436,57 @@ mod tests {
     }
 
     #[test]
+    fn courses_scan_handles_arbitrary_nesting_depth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // Three levels: course → module → submodule → video
+        touch(
+            &root
+                .join("01 Java")
+                .join("01 Ambientação")
+                .join("01 Boas vindas")
+                .join("01-aula.mp4"),
+        );
+        touch(
+            &root
+                .join("01 Java")
+                .join("01 Ambientação")
+                .join("02 Setup")
+                .join("02-aula.mp4"),
+        );
+        // Four levels: course → bucket → module → submodule → video
+        touch(
+            &root
+                .join("01 Java")
+                .join("03 Backend")
+                .join("videos")
+                .join("01-modulo")
+                .join("01-intro.mp4"),
+        );
+        // Video directly inside the course (no submodule chain)
+        touch(&root.join("02 Bash").join("01-pipes.mp4"));
+
+        let db = Database::new(&tmp.path().join("db.sqlite")).unwrap();
+        let lib = db
+            .insert_library("C", root.to_str().unwrap(), LibraryKind::Courses)
+            .unwrap();
+
+        scan(&lib, &db).unwrap();
+
+        let items = db.list_items_by_library(lib.id).unwrap();
+        assert_eq!(
+            items.len(),
+            4,
+            "all videos at any depth must be picked up"
+        );
+
+        let groups = db.list_top_level_groups(lib.id).unwrap();
+        let java = groups.iter().find(|g| g.title == "Java").unwrap();
+        // `01 Java` subtree contains 3 of the 4 videos.
+        assert_eq!(java.item_count, 3);
+    }
+
+    #[test]
     fn series_scan_recognizes_season_folders_and_sxxexx() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();

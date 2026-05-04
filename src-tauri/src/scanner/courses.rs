@@ -1,6 +1,8 @@
-// Courses: 2-level. Top-level folder = course. Sub-folder = module. Files
-// inside modules = items. If a course has no sub-folders, an implicit
-// `Main` module is synthesized to host its videos directly.
+// Courses: recursive. Every folder under the library root is a group.
+// Folders nest arbitrarily (course → module → submodule → ...). Video
+// files are placed under the group of their immediate parent folder.
+// Position is parsed from a leading numeric prefix (`01 - `, `02_`, ...)
+// when present; otherwise siblings get a sequential 1-based fallback.
 
 use std::path::{Path, PathBuf};
 
@@ -25,80 +27,58 @@ pub fn scan(library: &Library, db: &Database) -> Result<ScanResult> {
     let mut course_dirs = list_dirs(root)?;
     course_dirs.sort();
 
-    for (course_idx, course_dir) in course_dirs.iter().enumerate() {
-        let course_name = file_name_str(course_dir);
-        let (course_pos_raw, course_title_raw) = parse_position(&course_name);
-        let course_title = clean_title(&course_title_raw);
-        let course_position = if course_pos_raw == i32::MAX {
-            (course_idx as i32) + 1
-        } else {
-            course_pos_raw
-        };
-        let course_folder = path_to_string(course_dir);
-        groups.push(DesiredGroup {
-            parent_folder_path: None,
-            title: if course_title.is_empty() {
-                course_name.clone()
-            } else {
-                course_title
-            },
-            position: course_position,
-            folder_path: course_folder.clone(),
-            poster_path: None,
-        });
-
-        let mut module_dirs = list_dirs(course_dir)?;
-        module_dirs.sort();
-
-        if module_dirs.is_empty() {
-            // Implicit "Main" module so direct videos still belong to a group.
-            let implicit_path = format!("{course_folder}//Main");
-            groups.push(DesiredGroup {
-                parent_folder_path: Some(course_folder.clone()),
-                title: "Main".to_string(),
-                position: 1,
-                folder_path: implicit_path.clone(),
-                poster_path: None,
-            });
-            collect_videos(course_dir, &implicit_path, &mut items)?;
-        } else {
-            for (module_idx, module_dir) in module_dirs.iter().enumerate() {
-                let module_name = file_name_str(module_dir);
-                let (module_pos_raw, module_title_raw) = parse_position(&module_name);
-                let module_title = clean_title(&module_title_raw);
-                let module_position = if module_pos_raw == i32::MAX {
-                    (module_idx as i32) + 1
-                } else {
-                    module_pos_raw
-                };
-                let module_folder = path_to_string(module_dir);
-                groups.push(DesiredGroup {
-                    parent_folder_path: Some(course_folder.clone()),
-                    title: if module_title.is_empty() {
-                        module_name
-                    } else {
-                        module_title
-                    },
-                    position: module_position,
-                    folder_path: module_folder.clone(),
-                    poster_path: None,
-                });
-                collect_videos(module_dir, &module_folder, &mut items)?;
-            }
-        }
+    for (idx, course_dir) in course_dirs.iter().enumerate() {
+        walk(course_dir, None, idx as i32, &mut groups, &mut items)?;
     }
 
     reconcile(library.id, &groups, &items, db)
 }
 
-fn collect_videos(
+fn walk(
     dir: &Path,
-    parent_folder_path: &str,
-    out: &mut Vec<DesiredItem>,
+    parent_folder_path: Option<String>,
+    sibling_index: i32,
+    groups: &mut Vec<DesiredGroup>,
+    items: &mut Vec<DesiredItem>,
 ) -> Result<()> {
+    let raw_name = file_name_str(dir);
+    let (pos_raw, title_raw) = parse_position(&raw_name);
+    let title = clean_title(&title_raw);
+    let position = if pos_raw == i32::MAX {
+        sibling_index + 1
+    } else {
+        pos_raw
+    };
+    let folder_path = path_to_string(dir);
+
+    groups.push(DesiredGroup {
+        parent_folder_path,
+        title: if title.is_empty() {
+            raw_name.clone()
+        } else {
+            title
+        },
+        position,
+        folder_path: folder_path.clone(),
+        poster_path: None,
+    });
+
+    let mut subdirs = list_dirs(dir)?;
+    subdirs.sort();
+    for (sub_idx, subdir) in subdirs.iter().enumerate() {
+        walk(
+            subdir,
+            Some(folder_path.clone()),
+            sub_idx as i32,
+            groups,
+            items,
+        )?;
+    }
+
     let mut files = list_files(dir)?;
     files.sort();
-    for (idx, file) in files.iter().enumerate() {
+    let mut item_idx: i32 = 0;
+    for file in &files {
         if !is_video_file(file) {
             continue;
         }
@@ -106,12 +86,12 @@ fn collect_videos(
         let (pos_raw, rest) = parse_position(&raw);
         let title = clean_title(&rest);
         let position = if pos_raw == i32::MAX {
-            (idx as i32) + 1
+            item_idx + 1
         } else {
             pos_raw
         };
-        out.push(DesiredItem {
-            parent_folder_path: Some(parent_folder_path.to_string()),
+        items.push(DesiredItem {
+            parent_folder_path: Some(folder_path.clone()),
             title: if title.is_empty() { raw } else { title },
             position,
             file_path: path_to_string(file),
@@ -120,7 +100,9 @@ fn collect_videos(
             season_number: None,
             episode_number: None,
         });
+        item_idx += 1;
     }
+
     Ok(())
 }
 
