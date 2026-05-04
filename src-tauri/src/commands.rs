@@ -166,11 +166,33 @@ pub fn search(db: State<'_, Database>, query: String) -> CmdResult<SearchResults
 /// via the `item-progress` event. A new call kills any in-flight session.
 #[tauri::command]
 pub fn play_item(
-    _db: State<'_, Database>,
-    _app: AppHandle,
-    _item_id: i64,
+    db: State<'_, Database>,
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+    app: AppHandle,
+    item_id: i64,
 ) -> CmdResult<()> {
-    todo!("player-eng")
+    let item = db
+        .get_item_by_id(item_id)
+        .map_err(cmd_err)?
+        .ok_or_else(|| format!("item {item_id} not found"))?;
+    let resume_seconds = db
+        .get_progress_by_item(item_id)
+        .map_err(cmd_err)?
+        .map(|p| p.position_seconds)
+        .unwrap_or(0.0);
+
+    let db_handle = db.inner().clone();
+    let state_handle = state.inner().clone();
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) =
+            crate::mpv::play(item, resume_seconds, app_handle, db_handle, state_handle).await
+        {
+            log::error!("playback failed: {e}");
+        }
+    });
+    Ok(())
 }
 
 // ---- Settings (Backend Engineer) ------------------------------------------
