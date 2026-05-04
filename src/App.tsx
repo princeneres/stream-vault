@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import KindIcon from "@/components/KindIcon";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
 import { listLibraries, onItemProgress } from "@/lib/api";
@@ -34,19 +35,27 @@ export default function App() {
   }, [refreshLibraries]);
 
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
+    const unlisten: Array<() => void> = [];
     let cancelled = false;
-    onItemProgress(() => {
-      setProgressTick((t) => t + 1);
-    })
+    const bump = () => setProgressTick((t) => t + 1);
+
+    onItemProgress(bump)
       .then((fn) => {
         if (cancelled) fn();
-        else unlisten = fn;
+        else unlisten.push(fn);
       })
       .catch((e) => console.error("onItemProgress subscribe failed", e));
+
+    listen("library-artwork", bump)
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten.push(fn);
+      })
+      .catch((e) => console.error("library-artwork subscribe failed", e));
+
     return () => {
       cancelled = true;
-      if (unlisten) unlisten();
+      for (const fn of unlisten) fn();
     };
   }, []);
 

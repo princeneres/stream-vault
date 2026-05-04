@@ -9,14 +9,14 @@
 
 use std::path::Path;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::Database;
 use crate::models::{
     Group, GroupDetail, Item, ItemWithProgress, Library, LibraryContents,
     LibraryKind, ScanResult, SearchResults,
 };
-use crate::scanner;
+use crate::{scanner, thumbnails};
 
 pub type CmdResult<T> = std::result::Result<T, String>;
 
@@ -61,9 +61,16 @@ pub fn remove_library(db: State<'_, Database>, library_id: i64) -> CmdResult<()>
 // ---- Scanning (Backend Engineer) ------------------------------------------
 
 /// Walk the library root and reconcile DB rows. Incremental: existing items
-/// keyed by `file_path` keep their IDs and progress.
+/// keyed by `file_path` keep their IDs and progress. Artwork generation
+/// (ffprobe duration + ffmpeg thumbnails + group posters) runs in the
+/// background after this command returns; the frontend gets a
+/// `library-artwork` event for each library when work completes.
 #[tauri::command]
-pub fn scan_library(db: State<'_, Database>, library_id: i64) -> CmdResult<ScanResult> {
+pub fn scan_library(
+    db: State<'_, Database>,
+    app: AppHandle,
+    library_id: i64,
+) -> CmdResult<ScanResult> {
     let lib = db
         .get_library_by_id(library_id)
         .map_err(cmd_err)?
@@ -71,10 +78,96 @@ pub fn scan_library(db: State<'_, Database>, library_id: i64) -> CmdResult<ScanR
     let result = scanner::scan(&lib, db.inner()).map_err(cmd_err)?;
     db.update_library_last_scanned(library_id, chrono::Utc::now())
         .map_err(cmd_err)?;
-    // TODO(integrate-with-player-eng): after the Player Engineer's
-    // `thumbnails::generate_thumbnail` / `generate_poster` are merged, call
-    // them here for newly-added items / groups (best-effort, non-fatal).
+
+    let db_h = db.inner().clone();
+    let app_h = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = generate_artwork(&db_h, &app_h, library_id) {
+            log::warn!("artwork generation for library {library_id}: {e}");
+        }
+    });
+
     Ok(result)
+}
+
+/// ffprobe duration + ffmpeg thumbnail for items missing them, then group
+/// posters. Best-effort: missing ffmpeg/ffprobe just logs and skips.
+fn generate_artwork(db: &Database, app: &AppHandle, library_id: i64) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let thumb_dir = data_dir.join("thumbnails");
+    let poster_dir = data_dir.join("posters");
+
+    let items = db.list_items_by_library(library_id).map_err(cmd_err)?;
+    let mut artwork_dirty = false;
+
+    for item in &items {
+        let needs_duration = item.duration_seconds.is_none();
+        let needs_thumb = item.thumbnail_path.is_none()
+            || !item
+                .thumbnail_path
+                .as_deref()
+                .map(|p| Path::new(p).is_file())
+                .unwrap_or(false);
+        if !needs_duration && !needs_thumb {
+            continue;
+        }
+
+        if needs_duration {
+            match thumbnails::probe_duration(Path::new(&item.file_path)) {
+                Ok(d) => {
+                    let _ = db.update_item_duration(item.id, Some(d));
+                }
+                Err(e) => log::debug!("probe_duration {}: {e}", item.id),
+            }
+        }
+
+        if needs_thumb {
+            let fresh = match db.get_item_by_id(item.id) {
+                Ok(Some(i)) => i,
+                _ => continue,
+            };
+            match thumbnails::generate_thumbnail(&fresh, &thumb_dir) {
+                Ok(path) => {
+                    let p = path.to_string_lossy().to_string();
+                    let _ = db.update_item_thumbnail(item.id, Some(&p));
+                    artwork_dirty = true;
+                }
+                Err(e) => log::debug!("thumbnail {}: {e}", item.id),
+            }
+        }
+    }
+
+    let groups = db.list_groups_by_library(library_id).map_err(cmd_err)?;
+    for group in &groups {
+        let on_disk_ok = group
+            .poster_path
+            .as_deref()
+            .map(|p| Path::new(p).is_file())
+            .unwrap_or(false);
+        if on_disk_ok {
+            continue;
+        }
+        let group_items = db.list_items_by_group(group.id).map_err(cmd_err)?;
+        match thumbnails::generate_poster(group, &group_items, &poster_dir) {
+            Ok(path) => {
+                let p = path.to_string_lossy().to_string();
+                let _ = db.update_group_poster(group.id, Some(&p));
+                artwork_dirty = true;
+            }
+            Err(e) => log::debug!("poster {}: {e}", group.id),
+        }
+    }
+
+    if artwork_dirty {
+        let _ = app.emit(
+            "library-artwork",
+            serde_json::json!({ "libraryId": library_id }),
+        );
+    }
+    Ok(())
 }
 
 // ---- Reads (Backend Engineer) ---------------------------------------------
