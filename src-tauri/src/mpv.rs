@@ -75,12 +75,14 @@ pub async fn play(
     };
 
     let item_id = item.id;
+    let group_id = item.group_id;
     let task_app = app_handle.clone();
     let task_db = db.clone();
+    let task_state = state.clone();
     let task_socket = socket_path.clone();
 
     let task = tokio::spawn(async move {
-        progress_loop(task_socket, item_id, task_app, task_db).await;
+        progress_loop(task_socket, item_id, group_id, task_app, task_db, task_state).await;
     });
 
     let mut guard = state.inner.lock().await;
@@ -131,8 +133,10 @@ fn make_socket_path(item_id: i64) -> PathBuf {
 async fn progress_loop(
     socket_path: PathBuf,
     item_id: i64,
+    group_id: Option<i64>,
     app: AppHandle,
     db: Database,
+    state: Arc<PlaybackState>,
 ) {
     let stream = match wait_for_socket(&socket_path).await {
         Some(s) => s,
@@ -179,6 +183,9 @@ async fn progress_loop(
                         Ok(0) => {
                             // EOF — mpv exited
                             save_and_emit(&db, &app, item_id, last_position, last_duration);
+                            maybe_auto_advance(
+                                &db, &app, &state, item_id, group_id, last_position, last_duration,
+                            );
                             return;
                         }
                         Ok(_) => {
@@ -194,6 +201,9 @@ async fn progress_loop(
                         }
                         Err(_) => {
                             save_and_emit(&db, &app, item_id, last_position, last_duration);
+                            maybe_auto_advance(
+                                &db, &app, &state, item_id, group_id, last_position, last_duration,
+                            );
                             return;
                         }
                     }
@@ -207,6 +217,65 @@ async fn progress_loop(
     }
 
     save_and_emit(&db, &app, item_id, last_position, last_duration);
+    maybe_auto_advance(&db, &app, &state, item_id, group_id, last_position, last_duration);
+}
+
+/// If the just-finished item is completed, the user opted in to auto-advance,
+/// and a next item exists in the same group, spawn a fresh `play()` for it.
+/// Movies (group_id = None) and one-off generic items never auto-advance.
+#[cfg(target_os = "linux")]
+fn maybe_auto_advance(
+    db: &Database,
+    app: &AppHandle,
+    state: &Arc<PlaybackState>,
+    item_id: i64,
+    group_id: Option<i64>,
+    position_seconds: f64,
+    duration_seconds: f64,
+) {
+    if !is_completed(position_seconds, duration_seconds) {
+        return;
+    }
+    let Some(group_id) = group_id else { return };
+    if !auto_advance_enabled(db) {
+        return;
+    }
+    let next = match db.get_next_item(group_id) {
+        Ok(Some(n)) if n.id != item_id => n,
+        Ok(_) => return,
+        Err(e) => {
+            log::warn!("get_next_item failed during auto-advance: {e}");
+            return;
+        }
+    };
+
+    let app = app.clone();
+    let db = db.clone();
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = play(next, 0.0, app, db, state).await {
+            log::warn!("auto-advance play failed: {e}");
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn maybe_auto_advance(
+    _db: &Database,
+    _app: &AppHandle,
+    _state: &Arc<PlaybackState>,
+    _item_id: i64,
+    _group_id: Option<i64>,
+    _position_seconds: f64,
+    _duration_seconds: f64,
+) {
+}
+
+pub(crate) fn auto_advance_enabled(db: &Database) -> bool {
+    matches!(
+        db.get_setting("auto_advance").ok().flatten().as_deref(),
+        Some("true"),
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -296,5 +365,18 @@ mod tests {
     fn parse_response_rejects_null_data() {
         let line = r#"{"data": null, "request_id": 1, "error": "property unavailable"}"#;
         assert_eq!(parse_property_response(line), None);
+    }
+
+    #[test]
+    fn auto_advance_setting_only_true_string_enables() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(&dir.path().join("t.db")).unwrap();
+        assert!(!auto_advance_enabled(&db));
+        db.set_setting("auto_advance", "false").unwrap();
+        assert!(!auto_advance_enabled(&db));
+        db.set_setting("auto_advance", "true").unwrap();
+        assert!(auto_advance_enabled(&db));
+        db.set_setting("auto_advance", "1").unwrap();
+        assert!(!auto_advance_enabled(&db));
     }
 }
