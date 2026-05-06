@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
@@ -79,7 +79,7 @@ function ItemGrid({
   );
 }
 
-function SubgroupSection({
+const SubgroupSection = memo(function SubgroupSection({
   group,
   depth = 0,
   refreshTick,
@@ -171,7 +171,7 @@ function SubgroupSection({
       ) : null}
     </section>
   );
-}
+});
 
 export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const [detail, setDetail] = useState<GroupDetail | null>(null);
@@ -195,39 +195,42 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     };
   }, [groupId, progressTick, refreshTick]);
 
-  const bumpRefresh = () => setRefreshTick((t) => t + 1);
+  const bumpRefresh = useCallback(() => setRefreshTick((t) => t + 1), []);
 
-  const handlePlayNext = async () => {
+  const handlePlayNext = useCallback(async () => {
     try {
       const next = await getNextItem(groupId);
       if (next) await playItem(next.id);
     } catch (e) {
       console.error("getNextItem failed", e);
     }
-  };
+  }, [groupId]);
 
-  const handleItemToggle = async (
-    item: ItemWithProgress,
-    next: boolean,
-  ) => {
-    try {
-      await setItemCompleted(item.id, next);
-      bumpRefresh();
-    } catch (e) {
-      console.error("setItemCompleted failed", e);
-    }
-  };
+  const handleItemToggle = useCallback(
+    async (item: ItemWithProgress, next: boolean) => {
+      try {
+        await setItemCompleted(item.id, next);
+        bumpRefresh();
+      } catch (e) {
+        console.error("setItemCompleted failed", e);
+      }
+    },
+    [bumpRefresh],
+  );
 
-  const handleGroupToggle = async (group: Group, next: boolean) => {
-    try {
-      await setGroupCompleted(group.id, next);
-      bumpRefresh();
-    } catch (e) {
-      console.error("setGroupCompleted failed", e);
-    }
-  };
+  const handleGroupToggle = useCallback(
+    async (group: Group, next: boolean) => {
+      try {
+        await setGroupCompleted(group.id, next);
+        bumpRefresh();
+      } catch (e) {
+        console.error("setGroupCompleted failed", e);
+      }
+    },
+    [bumpRefresh],
+  );
 
-  const handlePickPoster = async () => {
+  const handlePickPoster = useCallback(async () => {
     try {
       const selected = await openDialog({
         directory: false,
@@ -243,9 +246,9 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [groupId, bumpRefresh]);
 
-  const handleRegenerateArtwork = async (libraryId: number) => {
+  const handleRegenerateArtwork = useCallback(async (libraryId: number) => {
     try {
       setBusyAction("artwork");
       await regenerateLibraryArtwork(libraryId);
@@ -254,7 +257,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     } finally {
       setBusyAction(null);
     }
-  };
+  }, []);
 
   if (error) {
     return (
@@ -289,8 +292,11 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
             <img
               src={poster}
               alt=""
+              width={320}
+              height={192}
               className="h-full w-full object-cover"
               loading="lazy"
+              decoding="async"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Play } from "lucide-react";
 import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
@@ -13,6 +14,11 @@ export interface ItemCardProps {
   onPlay?: () => void;
   className?: string;
 }
+
+const CV_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "224px 200px",
+} as const;
 
 function ItemCardImpl({
   title,
@@ -31,6 +37,7 @@ function ItemCardImpl({
     <Wrapper
       type={interactive ? "button" : undefined}
       onClick={onClick}
+      style={CV_STYLE}
       className={cn(
         "group relative flex w-56 shrink-0 flex-col gap-2 text-left",
         interactive &&
@@ -38,13 +45,16 @@ function ItemCardImpl({
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 group-hover:shadow-(--shadow-card-hover)">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
         {thumbnail ? (
           <img
             src={thumbnail}
             alt=""
+            width={224}
+            height={126}
             className="h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">
@@ -109,5 +119,6 @@ function Skeleton() {
   );
 }
 
-const ItemCard = Object.assign(ItemCardImpl, { Skeleton });
+const MemoItemCard = memo(ItemCardImpl);
+const ItemCard = Object.assign(MemoItemCard, { Skeleton });
 export default ItemCard;

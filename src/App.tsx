@@ -39,6 +39,19 @@ export default function App() {
     let cancelled = false;
     const bump = () => setProgressTick((t) => t + 1);
 
+    // Coalesce `library-artwork` bursts: the backend emits roughly every 8
+    // generated thumbnails during a scan, which would otherwise refetch every
+    // open view in lockstep and stutter scroll. One refresh per second is
+    // enough for progressive artwork to land.
+    let artworkTimer: ReturnType<typeof setTimeout> | null = null;
+    const artworkBump = () => {
+      if (artworkTimer) return;
+      artworkTimer = setTimeout(() => {
+        artworkTimer = null;
+        bump();
+      }, 1000);
+    };
+
     onItemProgress(bump)
       .then((fn) => {
         if (cancelled) fn();
@@ -46,7 +59,7 @@ export default function App() {
       })
       .catch((e) => console.error("onItemProgress subscribe failed", e));
 
-    listen("library-artwork", bump)
+    listen("library-artwork", artworkBump)
       .then((fn) => {
         if (cancelled) fn();
         else unlisten.push(fn);
@@ -55,6 +68,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      if (artworkTimer) clearTimeout(artworkTimer);
       for (const fn of unlisten) fn();
     };
   }, []);

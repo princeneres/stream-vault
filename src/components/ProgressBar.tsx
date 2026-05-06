@@ -34,7 +34,7 @@ export default function ProgressBar({
       )}
     >
       <div
-        className={cn("h-full rounded-(--radius-pill) transition-[width] duration-300", toneClass)}
+        className={cn("h-full rounded-(--radius-pill)", toneClass)}
         style={{ width: `${pct}%` }}
       />
     </div>

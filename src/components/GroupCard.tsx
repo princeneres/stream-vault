@@ -1,7 +1,13 @@
+import { memo } from "react";
 import { Layers } from "lucide-react";
 import type { LibraryKind } from "@/lib/types";
 import KindIcon from "./KindIcon";
 import { cn } from "./cn";
+
+const CV_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "240px 220px",
+} as const;
 
 export interface GroupCardProps {
   title: string;
@@ -37,15 +43,24 @@ function GroupCardImpl(props: GroupCardProps) {
     <button
       type="button"
       onClick={onClick}
+      style={CV_STYLE}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 group-hover:shadow-(--shadow-card-hover)">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
         {poster ? (
-          <img src={poster} alt="" className="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={poster}
+            alt=""
+            width={320}
+            height={180}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">
             <Layers size={28} aria-hidden />
@@ -80,5 +95,6 @@ function Skeleton() {
   );
 }
 
-const GroupCard = Object.assign(GroupCardImpl, { Skeleton });
+const MemoGroupCard = memo(GroupCardImpl);
+const GroupCard = Object.assign(MemoGroupCard, { Skeleton });
 export default GroupCard;

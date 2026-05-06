@@ -1,6 +1,12 @@
+import { memo } from "react";
 import { Check, CircleDashed, Film, PlayCircle } from "lucide-react";
 import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
+
+const CV_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "200px 320px",
+} as const;
 
 export type MovieStatus = "unwatched" | "in-progress" | "watched";
 
@@ -46,15 +52,24 @@ function MovieCardImpl({
     <button
       type="button"
       onClick={onClick}
+      style={CV_STYLE}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
         className,
       )}
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 group-hover:shadow-(--shadow-card-hover)">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
         {poster ? (
-          <img src={poster} alt="" className="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={poster}
+            alt=""
+            width={200}
+            height={300}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">
             <Film size={28} aria-hidden />
@@ -100,5 +115,6 @@ function Skeleton() {
   );
 }
 
-const MovieCard = Object.assign(MovieCardImpl, { Skeleton });
+const MemoMovieCard = memo(MovieCardImpl);
+const MovieCard = Object.assign(MemoMovieCard, { Skeleton });
 export default MovieCard;
