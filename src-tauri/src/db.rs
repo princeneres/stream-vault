@@ -580,6 +580,43 @@ impl Database {
         })
     }
 
+    pub fn delete_progress(&self, item_id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM progress WHERE item_id = ?", [item_id])?;
+            Ok(())
+        })
+    }
+
+    /// All leaf item ids in `group_id`'s subtree, paired with their stored
+    /// duration (if any). Used to cascade a "mark watched" toggle from a
+    /// group to every item it contains.
+    pub fn list_item_ids_in_group_subtree(
+        &self,
+        group_id: i64,
+    ) -> Result<Vec<(i64, Option<f64>)>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                r#"
+                WITH RECURSIVE tree(id) AS (
+                    SELECT id FROM groups WHERE id = ?
+                    UNION ALL
+                    SELECT g.id FROM groups g JOIN tree t ON g.parent_group_id = t.id
+                )
+                SELECT i.id, i.duration_seconds
+                FROM items i JOIN tree t ON t.id = i.group_id
+                "#,
+            )?;
+            let rows = stmt.query_map([group_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<f64>>(1)?))
+            })?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
     /// Returns items keyed by id with their `Progress` (if any).
     pub fn map_progress_for_items(
         &self,

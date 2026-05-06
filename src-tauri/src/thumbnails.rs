@@ -91,14 +91,46 @@ pub fn probe_duration(file_path: &Path) -> Result<f64> {
 }
 
 fn run_ffmpeg_thumbnail(file_path: &Path, seek: f64, out_path: &Path) -> Result<()> {
-    let status = Command::new("ffmpeg")
-        .arg("-y")
-        .arg("-ss").arg(format!("{seek}"))
-        .arg("-i").arg(file_path)
-        .arg("-vframes").arg("1")
-        .arg("-q:v").arg("3")
+    // Try fast input seek first (`-ss` before `-i`); fall back to accurate
+    // output seek if the encoder can't produce a frame from the rough
+    // keyframe target (some VFR / fragmented MP4 sources need this).
+    match try_ffmpeg(file_path, seek, out_path, true) {
+        Ok(()) => Ok(()),
+        Err(fast_err) => {
+            log::debug!("fast-seek ffmpeg failed for {}: {fast_err}", file_path.display());
+            try_ffmpeg(file_path, seek, out_path, false).map_err(|slow_err| {
+                anyhow!(
+                    "ffmpeg could not extract a frame from {}: fast={fast_err}; slow={slow_err}",
+                    file_path.display()
+                )
+            })
+        }
+    }
+}
+
+fn try_ffmpeg(
+    file_path: &Path,
+    seek: f64,
+    out_path: &Path,
+    fast_seek: bool,
+) -> Result<()> {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-y").arg("-loglevel").arg("error").arg("-nostdin");
+    if fast_seek {
+        cmd.arg("-ss").arg(format!("{seek}")).arg("-i").arg(file_path);
+    } else {
+        cmd.arg("-i").arg(file_path).arg("-ss").arg(format!("{seek}"));
+    }
+    let output = cmd
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-an")
+        .arg("-q:v")
+        .arg("3")
+        .arg("-update")
+        .arg("1")
         .arg(out_path)
-        .status()
+        .output()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 anyhow!("ffmpeg is not installed; skipping thumbnail")
@@ -106,10 +138,16 @@ fn run_ffmpeg_thumbnail(file_path: &Path, seek: f64, out_path: &Path) -> Result<
                 anyhow!("ffmpeg failed to start: {e}")
             }
         })?;
-    if !status.success() {
+    if !output.status.success() {
         return Err(anyhow!(
-            "ffmpeg exited with status {} while generating {}",
-            status,
+            "ffmpeg exited with status {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if !out_path.is_file() {
+        return Err(anyhow!(
+            "ffmpeg reported success but produced no file at {}",
             out_path.display()
         ));
     }

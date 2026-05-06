@@ -58,6 +58,31 @@ export function playItem(itemId: number): Promise<void> {
   return invoke<void>("play_item", { itemId });
 }
 
+export function setItemCompleted(
+  itemId: number,
+  completed: boolean,
+): Promise<void> {
+  return invoke<void>("set_item_completed", { itemId, completed });
+}
+
+export function setGroupCompleted(
+  groupId: number,
+  completed: boolean,
+): Promise<void> {
+  return invoke<void>("set_group_completed", { groupId, completed });
+}
+
+export function setGroupPoster(
+  groupId: number,
+  sourcePath: string,
+): Promise<string> {
+  return invoke<string>("set_group_poster", { groupId, sourcePath });
+}
+
+export function regenerateLibraryArtwork(libraryId: number): Promise<void> {
+  return invoke<void>("regenerate_library_artwork", { libraryId });
+}
+
 export function getSetting(key: string): Promise<string | null> {
   return invoke<string | null>("get_setting", { key });
 }

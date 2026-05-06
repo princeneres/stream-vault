@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::db::Database;
 use crate::models::{
     Group, GroupDetail, Item, ItemWithProgress, Library, LibraryContents,
-    LibraryKind, ScanResult, SearchResults,
+    LibraryKind, ProgressUpdate, ScanResult, SearchResults,
 };
 use crate::{scanner, thumbnails};
 
@@ -41,6 +41,7 @@ pub fn list_libraries(db: State<'_, Database>) -> CmdResult<Vec<Library>> {
 #[tauri::command]
 pub fn add_library(
     db: State<'_, Database>,
+    app: AppHandle,
     name: String,
     root_path: String,
     kind: LibraryKind,
@@ -49,6 +50,12 @@ pub fn add_library(
         .insert_library(&name, &root_path, kind)
         .map_err(cmd_err)?;
     lib.available = Path::new(&lib.root_path).is_dir();
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&lib.root_path, true) {
+        log::warn!(
+            "asset scope allow library {:?} failed: {e}",
+            lib.root_path
+        );
+    }
     Ok(lib)
 }
 
@@ -334,6 +341,133 @@ pub fn play_item(
             crate::mpv::play(item, resume_seconds, app_handle, db_handle, state_handle).await
         {
             log::error!("playback failed: {e}");
+        }
+    });
+    Ok(())
+}
+
+// ---- Progress toggles (Backend Engineer) ----------------------------------
+
+/// Mark a single item as watched / unwatched. Watched sets progress to its
+/// duration (or `1.0` if unknown) with `completed = 1`; unwatched clears
+/// the progress row. Emits `item-progress` so all open views refresh.
+#[tauri::command]
+pub fn set_item_completed(
+    db: State<'_, Database>,
+    app: AppHandle,
+    item_id: i64,
+    completed: bool,
+) -> CmdResult<()> {
+    let item = db
+        .get_item_by_id(item_id)
+        .map_err(cmd_err)?
+        .ok_or_else(|| format!("item {item_id} not found"))?;
+    let duration = item.duration_seconds.unwrap_or(0.0);
+    apply_completed(&db, item_id, completed, duration).map_err(cmd_err)?;
+    let _ = app.emit(
+        "item-progress",
+        ProgressUpdate {
+            item_id,
+            position_seconds: if completed { duration } else { 0.0 },
+            duration_seconds: duration,
+        },
+    );
+    Ok(())
+}
+
+/// Cascade a watched / unwatched toggle to every leaf item in `group_id`'s
+/// subtree. Emits a single `item-progress` event so the UI refreshes.
+#[tauri::command]
+pub fn set_group_completed(
+    db: State<'_, Database>,
+    app: AppHandle,
+    group_id: i64,
+    completed: bool,
+) -> CmdResult<()> {
+    let leaves = db
+        .list_item_ids_in_group_subtree(group_id)
+        .map_err(cmd_err)?;
+    for (id, dur) in &leaves {
+        apply_completed(&db, *id, completed, dur.unwrap_or(0.0)).map_err(cmd_err)?;
+    }
+    if let Some((id, dur)) = leaves.first() {
+        let _ = app.emit(
+            "item-progress",
+            ProgressUpdate {
+                item_id: *id,
+                position_seconds: if completed { dur.unwrap_or(0.0) } else { 0.0 },
+                duration_seconds: dur.unwrap_or(0.0),
+            },
+        );
+    }
+    Ok(())
+}
+
+fn apply_completed(
+    db: &Database,
+    item_id: i64,
+    completed: bool,
+    duration: f64,
+) -> Result<(), anyhow::Error> {
+    if completed {
+        let pos = if duration > 0.0 { duration } else { 1.0 };
+        db.upsert_progress(item_id, pos, true)
+    } else {
+        db.delete_progress(item_id)
+    }
+}
+
+// ---- Artwork (Backend Engineer) -------------------------------------------
+
+/// Replace a group's poster with a user-supplied image. Copies the source
+/// file into the app's `posters/` data dir under a stable, unique filename
+/// (so the asset protocol can serve it after the source is moved/deleted)
+/// and persists the new path on the group row. Returns the new poster path.
+#[tauri::command]
+pub fn set_group_poster(
+    db: State<'_, Database>,
+    app: AppHandle,
+    group_id: i64,
+    source_path: String,
+) -> CmdResult<String> {
+    let src = std::path::PathBuf::from(&source_path);
+    if !src.is_file() {
+        return Err(format!("source image not found: {source_path}"));
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg")
+        .to_ascii_lowercase();
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let poster_dir = data_dir.join("posters");
+    std::fs::create_dir_all(&poster_dir).map_err(cmd_err)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dest = poster_dir.join(format!("group-{group_id}-{stamp}.{ext}"));
+    std::fs::copy(&src, &dest).map_err(cmd_err)?;
+    let dest_str = dest.to_string_lossy().to_string();
+    db.update_group_poster(group_id, Some(&dest_str)).map_err(cmd_err)?;
+    Ok(dest_str)
+}
+
+/// Re-run thumbnail / poster generation for a library. Only items missing
+/// a usable thumbnail file on disk are processed (same logic as the post-
+/// scan pass), so this is a safe retry button after installing ffmpeg or
+/// fixing permissions.
+#[tauri::command]
+pub fn regenerate_library_artwork(
+    db: State<'_, Database>,
+    app: AppHandle,
+    library_id: i64,
+) -> CmdResult<()> {
+    let db_h = db.inner().clone();
+    let app_h = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = generate_artwork(&db_h, &app_h, library_id) {
+            log::warn!("artwork regen for library {library_id}: {e}");
         }
     });
     Ok(())

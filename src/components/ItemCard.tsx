@@ -7,6 +7,8 @@ export interface ItemCardProps {
   thumbnail?: string | null;
   progressPercent?: number;
   subtitle?: string;
+  completed?: boolean;
+  onToggleCompleted?: (next: boolean) => void;
   onClick?: () => void;
   onPlay?: () => void;
   className?: string;
@@ -17,6 +19,8 @@ function ItemCardImpl({
   thumbnail,
   progressPercent,
   subtitle,
+  completed,
+  onToggleCompleted,
   onClick,
   onPlay,
   className,
@@ -47,6 +51,20 @@ function ItemCardImpl({
             <Play size={28} aria-hidden />
           </div>
         )}
+        {onToggleCompleted ? (
+          <label
+            className="absolute left-2 top-2 inline-flex items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 p-1"
+            onClick={(e) => e.stopPropagation()}
+            aria-label={completed ? "Mark unwatched" : "Mark watched"}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(completed)}
+              onChange={(e) => onToggleCompleted(e.currentTarget.checked)}
+              className="h-4 w-4 cursor-pointer accent-(--color-accent)"
+            />
+          </label>
+        ) : null}
         {onPlay ? (
           <span
             className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 text-(--color-text-primary) opacity-0 transition-opacity group-hover:opacity-100"
