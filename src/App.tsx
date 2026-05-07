@@ -216,6 +216,7 @@ function AppShell({
         activeId={activeId}
         onSelect={onSelect}
         onSearch={() => setPaletteOpen(true)}
+        onShortcuts={() => setShortcutsOpen(true)}
       />
       <CommandPalette
         open={paletteOpen}

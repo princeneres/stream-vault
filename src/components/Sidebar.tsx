@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Search } from "lucide-react";
+import { Keyboard, Search } from "lucide-react";
 import { cn } from "./cn";
 
 export interface SidebarItem {
@@ -14,14 +14,23 @@ export interface SidebarProps {
   activeId: string | null;
   onSelect: (id: string) => void;
   onSearch?: () => void;
+  onShortcuts?: () => void;
   className?: string;
 }
+
+const QUICK_SHORTCUTS: { keys: string[]; label: string }[] = [
+  { keys: ["/"], label: "Search" },
+  { keys: ["g", "h"], label: "Home" },
+  { keys: ["g", "s"], label: "Settings" },
+  { keys: ["?"], label: "More" },
+];
 
 export default function Sidebar({
   items,
   activeId,
   onSelect,
   onSearch,
+  onShortcuts,
   className,
 }: SidebarProps) {
   return (
@@ -57,7 +66,7 @@ export default function Sidebar({
       ) : null}
       <nav
         aria-label="Libraries"
-        className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
+        className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-2"
       >
         {items.map((item) => {
           const active = item.id === activeId;
@@ -87,6 +96,38 @@ export default function Sidebar({
           );
         })}
       </nav>
+      <button
+        type="button"
+        onClick={onShortcuts}
+        disabled={!onShortcuts}
+        aria-label="Show keyboard shortcuts"
+        className="group/sc mt-2 flex flex-col gap-1.5 rounded-(--radius-control) border border-(--color-border-subtle) bg-(--color-surface-raised) px-3 py-2 text-left transition-colors hover:bg-(--color-surface-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) disabled:cursor-default disabled:hover:bg-(--color-surface-raised)"
+      >
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--color-text-muted)">
+          <Keyboard size={11} aria-hidden />
+          Shortcuts
+        </span>
+        <ul className="space-y-1">
+          {QUICK_SHORTCUTS.map((s) => (
+            <li
+              key={s.label}
+              className="flex items-center justify-between gap-2 text-[11px] text-(--color-text-secondary)"
+            >
+              <span>{s.label}</span>
+              <span className="flex items-center gap-0.5">
+                {s.keys.map((k, i) => (
+                  <kbd
+                    key={i}
+                    className="rounded bg-(--color-bg) px-1 py-px text-[10px] font-medium text-(--color-text-primary)"
+                  >
+                    {k}
+                  </kbd>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </button>
     </aside>
   );
 }

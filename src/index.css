@@ -1,36 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  /* Base surfaces */
-  --color-bg: #0b0d10;
-  --color-surface: #14171c;
-  --color-surface-raised: #1c2027;
-  --color-surface-hover: #232832;
-  --color-overlay: rgba(8, 10, 13, 0.72);
+  /* Notion-inspired dark palette */
+  --color-bg: #191919;
+  --color-surface: #202020;
+  --color-surface-raised: #2a2a2a;
+  --color-surface-hover: #2f2f2f;
+  --color-overlay: rgba(0, 0, 0, 0.7);
 
   /* Borders */
-  --color-border-subtle: #262b33;
-  --color-border-strong: #353b46;
+  --color-border-subtle: #2f2f2f;
+  --color-border-strong: #404040;
 
-  /* Text */
-  --color-text-primary: #e6e8eb;
-  --color-text-secondary: #a8adb6;
-  --color-text-muted: #6c7280;
-  --color-text-inverse: #0b0d10;
+  /* Text — Notion uses opacity-based hierarchy */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b3b3b3;
+  --color-text-muted: #808080;
+  --color-text-inverse: #191919;
 
-  /* Accent — desaturated indigo, dark-friendly */
-  --color-accent: #7c93f5;
-  --color-accent-hover: #94a7f8;
-  --color-accent-active: #6478e2;
-  --color-accent-soft: rgba(124, 147, 245, 0.16);
+  /* Accent — Notion blue (#529CCA family) */
+  --color-accent: #529cca;
+  --color-accent-hover: #5fa8d4;
+  --color-accent-active: #4a91d7;
+  --color-accent-soft: rgba(82, 156, 202, 0.16);
 
-  /* Semantic */
-  --color-success: #4ade80;
-  --color-success-soft: rgba(74, 222, 128, 0.16);
-  --color-warning: #f5b86e;
-  --color-danger: #f47b7b;
-  --color-danger-hover: #f69595;
-  --color-danger-soft: rgba(244, 123, 123, 0.16);
+  /* Semantic — Notion's callout palette */
+  --color-success: #4dab9a;
+  --color-success-soft: rgba(77, 171, 154, 0.16);
+  --color-warning: #dfab01;
+  --color-danger: #e03e3e;
+  --color-danger-hover: #eb5757;
+  --color-danger-soft: rgba(224, 62, 62, 0.16);
 
   /* Radii */
   --radius-pill: 9999px;

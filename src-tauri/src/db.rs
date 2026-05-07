@@ -156,6 +156,10 @@ fn group_from_row(r: &Row<'_>) -> rusqlite::Result<Group> {
 /// SELECT clause that returns every `Group` field plus the recursive
 /// `item_count` and `completed_count` aggregates over the group's subtree.
 /// Use as the `<select>` in queries shaped like `<select> FROM groups g WHERE ...`.
+///
+/// `poster_path` falls back to the first descendant item's `thumbnail_path`
+/// when the group has no explicit poster yet — keeps cards visually populated
+/// before the artwork generator runs.
 const GROUP_SELECT_WITH_AGGREGATES: &str = "
     WITH RECURSIVE descendants(root, id) AS (
         SELECT id, id FROM groups
@@ -171,13 +175,29 @@ const GROUP_SELECT_WITH_AGGREGATES: &str = "
         LEFT JOIN items ON items.group_id = d.id
         LEFT JOIN progress ON progress.item_id = items.id
         GROUP BY d.root
+    ),
+    fallback_posters AS (
+        SELECT group_id, thumbnail_path FROM (
+            SELECT d.root AS group_id,
+                   items.thumbnail_path,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY d.root
+                       ORDER BY items.position, items.id
+                   ) AS rn
+            FROM descendants d
+            JOIN items ON items.group_id = d.id
+            WHERE items.thumbnail_path IS NOT NULL
+        )
+        WHERE rn = 1
     )
     SELECT g.id, g.library_id, g.parent_group_id, g.title, g.position,
-           g.folder_path, g.poster_path,
+           g.folder_path,
+           COALESCE(g.poster_path, fp.thumbnail_path) AS poster_path,
            COALESCE(a.item_count, 0) AS item_count,
            COALESCE(a.completed_count, 0) AS completed_count
     FROM groups g
-    LEFT JOIN aggregates a ON a.group_id = g.id";
+    LEFT JOIN aggregates a ON a.group_id = g.id
+    LEFT JOIN fallback_posters fp ON fp.group_id = g.id";
 
 fn item_from_row(r: &Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {

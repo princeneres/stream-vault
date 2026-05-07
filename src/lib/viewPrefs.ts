@@ -1,6 +1,6 @@
 import type { Group, ItemWithProgress } from "./types";
 
-export type SortKey = "name" | "recent" | "progress";
+export type SortKey = "default" | "name" | "recent" | "progress";
 export type FilterKey = "all" | "in-progress" | "completed" | "unwatched";
 
 export interface ViewPrefs {
@@ -8,10 +8,11 @@ export interface ViewPrefs {
   filter: FilterKey;
 }
 
-export const DEFAULT_PREFS: ViewPrefs = { sort: "name", filter: "all" };
+export const DEFAULT_PREFS: ViewPrefs = { sort: "default", filter: "all" };
 
 const SORT_LABELS: Record<SortKey, string> = {
-  name: "Name",
+  default: "Default",
+  name: "Name (A–Z)",
   recent: "Recently watched",
   progress: "Progress",
 };
@@ -67,6 +68,9 @@ export function applyItemPrefs(
     case "progress":
       sorted.sort((a, b) => itemProgressPct(b) - itemProgressPct(a));
       break;
+    case "default":
+      sorted.sort((a, b) => a.position - b.position || a.id - b.id);
+      break;
   }
   return sorted;
 }
@@ -102,8 +106,9 @@ export function applyGroupPrefs(
         return pb - pa;
       });
       break;
+    case "default":
     case "recent":
-      sorted.sort((a, b) => a.position - b.position);
+      sorted.sort((a, b) => a.position - b.position || a.id - b.id);
       break;
   }
   return sorted;

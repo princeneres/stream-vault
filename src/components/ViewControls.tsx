@@ -12,7 +12,7 @@ export interface ViewControlsProps {
 }
 
 const PILL_CLASS =
-  "inline-flex h-8 items-center gap-1.5 rounded-(--radius-control) border border-(--color-border-subtle) bg-(--color-surface) px-3 text-xs font-medium text-(--color-text-secondary) transition-colors hover:bg-(--color-surface-raised) hover:text-(--color-text-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)";
+  "h-8 gap-1.5 rounded-(--radius-control) border border-(--color-border-subtle) bg-(--color-surface) px-3 text-xs font-medium text-(--color-text-secondary) transition-colors hover:bg-(--color-surface-raised) hover:text-(--color-text-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)";
 
 export default function ViewControls({ prefs, onChange }: ViewControlsProps) {
   const sortLabel =
@@ -55,22 +55,24 @@ export default function ViewControls({ prefs, onChange }: ViewControlsProps) {
       <DropdownMenu
         triggerLabel="Sort"
         align="end"
+        triggerClassName={PILL_CLASS}
         trigger={
-          <span className={PILL_CLASS}>
+          <>
             <ArrowDownUp size={12} aria-hidden />
             <span>{sortLabel}</span>
-          </span>
+          </>
         }
         items={sortItems}
       />
       <DropdownMenu
         triggerLabel="Filter"
         align="end"
+        triggerClassName={PILL_CLASS}
         trigger={
-          <span className={PILL_CLASS}>
+          <>
             <Filter size={12} aria-hidden />
             <span>{filterLabel}</span>
-          </span>
+          </>
         }
         items={filterItems}
       />

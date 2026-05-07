@@ -25,6 +25,7 @@ export interface DropdownMenuProps {
   items: MenuItem[];
   align?: "start" | "end";
   triggerLabel?: string;
+  triggerClassName?: string;
 }
 
 export default function DropdownMenu({
@@ -32,6 +33,7 @@ export default function DropdownMenu({
   items,
   align = "start",
   triggerLabel,
+  triggerClassName,
 }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,7 +67,7 @@ export default function DropdownMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={triggerLabel}
-        className="inline-flex"
+        className={cn("inline-flex items-center", triggerClassName)}
       >
         {trigger}
       </button>
