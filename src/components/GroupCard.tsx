@@ -50,14 +50,14 @@ function GroupCardImpl(props: GroupCardProps) {
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
         {poster ? (
           <img
             src={poster}
             alt=""
             width={320}
             height={180}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover motion-safe:transition-transform motion-safe:duration-300 motion-safe:group-hover:scale-[1.04]"
             loading="lazy"
             decoding="async"
           />

@@ -45,14 +45,14 @@ function ItemCardImpl({
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
         {thumbnail ? (
           <img
             src={thumbnail}
             alt=""
             width={224}
             height={126}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover motion-safe:transition-transform motion-safe:duration-300 motion-safe:group-hover:scale-[1.04]"
             loading="lazy"
             decoding="async"
           />
@@ -61,6 +61,16 @@ function ItemCardImpl({
             <Play size={28} aria-hidden />
           </div>
         )}
+        {interactive ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 flex items-center justify-center bg-(--color-bg)/30 opacity-0 motion-safe:transition-opacity group-hover:opacity-100"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
+              <Play size={20} fill="currentColor" />
+            </span>
+          </span>
+        ) : null}
         {onToggleCompleted ? (
           <label
             className="absolute left-2 top-2 inline-flex items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 p-1"

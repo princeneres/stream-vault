@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import CommandPalette from "@/components/CommandPalette";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
+import ShortcutsDialog from "@/components/ShortcutsDialog";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
 import { ToastProvider } from "@/components/Toast";
 import { listLibraries, onItemProgress } from "@/lib/api";
@@ -139,10 +140,22 @@ function AppShell({
   refreshLibraries,
 }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
+    let chordTimer: ReturnType<typeof setTimeout> | null = null;
+    let chord: "g" | null = null;
+
+    const clearChord = () => {
+      chord = null;
+      if (chordTimer) {
+        clearTimeout(chordTimer);
+        chordTimer = null;
+      }
+    };
+
     const onKey = (e: KeyboardEvent) => {
-      if (paletteOpen) return;
+      if (paletteOpen || shortcutsOpen) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -152,17 +165,46 @@ function AppShell({
       ) {
         return;
       }
+      if (e.altKey || e.ctrlKey || e.metaKey) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          setPaletteOpen(true);
+        }
+        return;
+      }
+      if (chord === "g") {
+        if (e.key === "h") {
+          e.preventDefault();
+          setView({ kind: "home" });
+        } else if (e.key === "s") {
+          e.preventDefault();
+          setView({ kind: "settings" });
+        }
+        clearChord();
+        return;
+      }
+      if (e.key === "g") {
+        chord = "g";
+        chordTimer = setTimeout(clearChord, 700);
+        return;
+      }
       if (e.key === "/") {
         e.preventDefault();
         setPaletteOpen(true);
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      } else if (e.key === "?") {
         e.preventDefault();
-        setPaletteOpen(true);
+        setShortcutsOpen(true);
+      } else if (e.key === "Escape" && view.kind !== "home") {
+        e.preventDefault();
+        setView({ kind: "home" });
       }
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [paletteOpen]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (chordTimer) clearTimeout(chordTimer);
+    };
+  }, [paletteOpen, shortcutsOpen, setView, view.kind]);
 
   return (
     <div className="flex h-screen bg-(--color-bg) text-(--color-text-primary)">
@@ -182,6 +224,10 @@ function AppShell({
           setView({ kind: "group", id });
           setPaletteOpen(false);
         }}
+      />
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
       />
       <main
         id="main"

@@ -59,14 +59,14 @@ function MovieCardImpl({
         className,
       )}
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) transition-transform group-hover:-translate-y-0.5 hover:[will-change:transform]">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
         {poster ? (
           <img
             src={poster}
             alt=""
             width={200}
             height={300}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover motion-safe:transition-transform motion-safe:duration-300 motion-safe:group-hover:scale-[1.04]"
             loading="lazy"
             decoding="async"
           />
@@ -75,6 +75,14 @@ function MovieCardImpl({
             <Film size={28} aria-hidden />
           </div>
         )}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-(--color-bg)/30 opacity-0 motion-safe:transition-opacity group-hover:opacity-100"
+        >
+          <span className="flex h-14 w-14 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
+            <PlayCircle size={24} fill="currentColor" strokeWidth={1} />
+          </span>
+        </span>
         <span
           className={cn(
             "absolute right-2 top-2 inline-flex items-center gap-1 rounded-(--radius-pill) bg-(--color-bg)/75 px-2 py-0.5 text-[11px]",

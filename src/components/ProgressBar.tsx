@@ -15,8 +15,9 @@ export default function ProgressBar({
 }: ProgressBarProps) {
   const pct = Math.max(0, Math.min(1, value)) * 100;
   const heightClass = size === "sm" ? "h-1" : "h-1.5";
+  const nearComplete = tone === "accent" && pct >= 90;
   const toneClass =
-    tone === "success"
+    tone === "success" || nearComplete
       ? "bg-(--color-success)"
       : tone === "muted"
         ? "bg-(--color-text-muted)"
@@ -34,7 +35,10 @@ export default function ProgressBar({
       )}
     >
       <div
-        className={cn("h-full rounded-(--radius-pill)", toneClass)}
+        className={cn(
+          "h-full rounded-(--radius-pill) motion-safe:transition-[width,background-color] motion-safe:duration-300",
+          toneClass,
+        )}
         style={{ width: `${pct}%` }}
       />
     </div>
