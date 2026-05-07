@@ -7,20 +7,15 @@ import KindIcon from "@/components/KindIcon";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
 import { ToastProvider } from "@/components/Toast";
 import { listLibraries, onItemProgress } from "@/lib/api";
+import { type Route, useRoute } from "@/lib/router";
 import type { Library } from "@/lib/types";
 import DetailView from "@/views/DetailView";
 import Home from "@/views/Home";
 import LibraryView from "@/views/LibraryView";
 import Settings from "@/views/Settings";
 
-type View =
-  | { kind: "home" }
-  | { kind: "library"; id: number }
-  | { kind: "group"; id: number }
-  | { kind: "settings" };
-
 export default function App() {
-  const [view, setView] = useState<View>({ kind: "home" });
+  const [view, setView] = useRoute();
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [progressTick, setProgressTick] = useState(0);
 
@@ -126,10 +121,10 @@ interface AppShellProps {
   sidebarItems: SidebarItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  view: View;
+  view: Route;
   libraries: Library[];
   progressTick: number;
-  setView: (v: View) => void;
+  setView: (v: Route) => void;
   refreshLibraries: () => Promise<void>;
 }
 
@@ -188,7 +183,11 @@ function AppShell({
           setPaletteOpen(false);
         }}
       />
-      <main id="main" className="flex-1 overflow-y-auto">
+      <main
+        id="main"
+        tabIndex={-1}
+        className="flex-1 overflow-y-auto outline-none"
+      >
         {view.kind === "home" ? (
           <Home
             libraries={libraries}

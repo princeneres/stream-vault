@@ -285,59 +285,80 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const combinedTick = progressTick + refreshTick;
 
   return (
-    <div className="space-y-8 px-8 py-6">
-      <header className="flex flex-col gap-4 md:flex-row md:items-end">
-        <div className="group/poster relative h-48 w-80 shrink-0 overflow-hidden rounded-(--radius-card-lg) bg-(--color-surface-raised) shadow-(--shadow-card)">
-          {poster ? (
+    <div className="space-y-8">
+      <header className="relative isolate overflow-hidden">
+        {poster ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 -z-10"
+          >
             <img
               src={poster}
               alt=""
-              width={320}
-              height={192}
-              className="h-full w-full object-cover"
-              decoding="async"
-              fetchPriority="high"
+              className="h-full w-full scale-110 object-cover blur-3xl saturate-150 opacity-50 motion-safe:transition-opacity motion-safe:duration-500"
             />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">
-              <Layers size={36} aria-hidden />
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={handlePickPoster}
-            disabled={busyAction === "poster"}
-            className="absolute inset-0 flex items-end justify-end bg-(--color-bg)/0 p-3 text-(--color-text-primary) opacity-0 transition-opacity group-hover/poster:bg-(--color-bg)/40 group-hover/poster:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
-            aria-label="Change poster image"
-          >
-            <span className="inline-flex items-center gap-1.5 rounded-(--radius-pill) bg-(--color-bg)/80 px-3 py-1.5 text-xs font-medium">
-              <ImagePlus size={14} aria-hidden />
-              {busyAction === "poster" ? "Saving…" : "Change image"}
-            </span>
-          </button>
-        </div>
-        <div className="flex-1 space-y-3">
-          <h1 className="text-3xl font-semibold text-(--color-text-primary)">
-            {group.title}
-          </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="primary"
-              leadingIcon={<Play size={14} />}
-              onClick={handlePlayNext}
+            <div className="absolute inset-0 bg-gradient-to-b from-(--color-bg)/40 via-(--color-bg)/70 to-(--color-bg)" />
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-4 px-8 py-10 md:flex-row md:items-end">
+          <div className="group/poster relative h-48 w-80 shrink-0 overflow-hidden rounded-(--radius-card-lg) bg-(--color-surface-raised) shadow-(--shadow-card)">
+            {poster ? (
+              <img
+                src={poster}
+                alt=""
+                width={320}
+                height={192}
+                className="h-full w-full object-cover"
+                decoding="async"
+                fetchPriority="high"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">
+                <Layers size={36} aria-hidden />
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handlePickPoster}
+              disabled={busyAction === "poster"}
+              className="absolute inset-0 flex items-end justify-end bg-(--color-bg)/0 p-3 text-(--color-text-primary) opacity-0 transition-opacity group-hover/poster:bg-(--color-bg)/40 group-hover/poster:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+              aria-label="Change poster image"
             >
-              Play next
-            </Button>
-            <IconButton
-              icon={<RefreshCw size={14} />}
-              tooltip="Regenerate thumbnails"
-              size="sm"
-              onClick={() => handleRegenerateArtwork(group.libraryId)}
-              disabled={busyAction === "artwork"}
-            />
+              <span className="inline-flex items-center gap-1.5 rounded-(--radius-pill) bg-(--color-bg)/80 px-3 py-1.5 text-xs font-medium">
+                <ImagePlus size={14} aria-hidden />
+                {busyAction === "poster" ? "Saving…" : "Change image"}
+              </span>
+            </button>
+          </div>
+          <div className="flex-1 space-y-3">
+            <h1 className="text-pretty text-3xl font-semibold text-(--color-text-primary) drop-shadow-md">
+              {group.title}
+            </h1>
+            {group.itemCount > 0 ? (
+              <p className="tabular-nums text-sm text-(--color-text-secondary)">
+                {group.completedCount} of {group.itemCount} watched
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                leadingIcon={<Play size={14} />}
+                onClick={handlePlayNext}
+              >
+                Play next
+              </Button>
+              <IconButton
+                icon={<RefreshCw size={14} />}
+                tooltip="Regenerate thumbnails"
+                size="sm"
+                onClick={() => handleRegenerateArtwork(group.libraryId)}
+                disabled={busyAction === "artwork"}
+              />
+            </div>
           </div>
         </div>
       </header>
+      <div className="space-y-8 px-8">
 
       {items.length > 0 ? (
         <section className="space-y-3">
@@ -365,6 +386,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
           description="No subgroups or items found in this group."
         />
       ) : null}
+      </div>
     </div>
   );
 }
