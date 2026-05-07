@@ -139,7 +139,7 @@ const SubgroupSection = memo(function SubgroupSection({
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           <span>{group.title}</span>
           {group.itemCount > 0 ? (
-            <span className="text-xs font-normal text-(--color-text-secondary)">
+            <span className="tabular-nums text-xs font-normal text-(--color-text-secondary)">
               {group.completedCount} / {group.itemCount}
             </span>
           ) : null}
@@ -295,8 +295,8 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
               width={320}
               height={192}
               className="h-full w-full object-cover"
-              loading="lazy"
               decoding="async"
+              fetchPriority="high"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-(--color-text-muted)">

@@ -26,6 +26,7 @@ export default function Sidebar({
 }: SidebarProps) {
   return (
     <aside
+      aria-label="Primary"
       className={cn(
         "flex h-full w-60 shrink-0 flex-col gap-2 border-r border-(--color-border-subtle) bg-(--color-surface) px-3 py-4",
         className,
@@ -54,7 +55,10 @@ export default function Sidebar({
           </kbd>
         </button>
       ) : null}
-      <nav className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+      <nav
+        aria-label="Libraries"
+        className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
+      >
         {items.map((item) => {
           const active = item.id === activeId;
           return (

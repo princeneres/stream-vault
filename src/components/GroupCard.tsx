@@ -72,11 +72,13 @@ function GroupCardImpl(props: GroupCardProps) {
         </span>
       </div>
       <div className="px-0.5">
-        <p className="line-clamp-2 text-sm font-semibold text-(--color-text-primary)">
+        <p className="line-clamp-2 text-pretty text-sm font-semibold text-(--color-text-primary)">
           {title}
         </p>
         {meta ? (
-          <p className="text-xs text-(--color-text-secondary)">{meta}</p>
+          <p className="tabular-nums text-xs text-(--color-text-secondary)">
+            {meta}
+          </p>
         ) : null}
       </div>
     </button>

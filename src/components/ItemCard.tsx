@@ -76,18 +76,17 @@ function ItemCardImpl({
           </label>
         ) : null}
         {onPlay ? (
-          <span
-            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 text-(--color-text-primary) opacity-0 transition-opacity group-hover:opacity-100"
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onPlay();
             }}
-            role="button"
-            tabIndex={-1}
             aria-label="Play"
+            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 text-(--color-text-primary) opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
           >
             <Play size={14} aria-hidden />
-          </span>
+          </button>
         ) : null}
         {typeof progressPercent === "number" && progressPercent > 0 ? (
           <div className="absolute inset-x-0 bottom-0 px-1.5 pb-1.5">
@@ -96,11 +95,13 @@ function ItemCardImpl({
         ) : null}
       </div>
       <div className="px-0.5">
-        <p className="line-clamp-2 text-sm font-medium text-(--color-text-primary)">
+        <p className="line-clamp-2 text-pretty text-sm font-medium text-(--color-text-primary)">
           {title}
         </p>
         {subtitle ? (
-          <p className="text-xs text-(--color-text-secondary)">{subtitle}</p>
+          <p className="tabular-nums text-xs text-(--color-text-secondary)">
+            {subtitle}
+          </p>
         ) : null}
       </div>
     </Wrapper>

@@ -92,7 +92,7 @@ function MovieCardImpl({
         ) : null}
       </div>
       <div className="px-0.5">
-        <p className="line-clamp-2 text-sm font-semibold text-(--color-text-primary)">
+        <p className="line-clamp-2 text-pretty text-sm font-semibold text-(--color-text-primary)">
           {title}
         </p>
         {durationLabel ? (

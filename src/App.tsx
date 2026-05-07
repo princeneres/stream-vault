@@ -103,12 +103,15 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-(--color-bg) text-(--color-text-primary)">
+      <a href="#main" className="skip-link">
+        Skip to main content
+      </a>
       <Sidebar
         items={sidebarItems}
         activeId={activeId}
         onSelect={handleSelect}
       />
-      <main className="flex-1 overflow-y-auto">
+      <main id="main" className="flex-1 overflow-y-auto">
         {view.kind === "home" ? (
           <Home
             libraries={libraries}
