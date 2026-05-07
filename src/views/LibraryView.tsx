@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Inbox } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
 import MovieCard, { type MovieStatus } from "@/components/MovieCard";
+import ViewControls from "@/components/ViewControls";
 import { convertFileSrc, getLibraryContents, playItem } from "@/lib/api";
 import type { ItemWithProgress, LibraryContents } from "@/lib/types";
+import {
+  applyGroupPrefs,
+  applyItemPrefs,
+  DEFAULT_PREFS,
+  type ViewPrefs,
+} from "@/lib/viewPrefs";
 
 export interface LibraryViewProps {
   libraryId: number;
@@ -38,6 +45,11 @@ export default function LibraryView({
 }: LibraryViewProps) {
   const [contents, setContents] = useState<LibraryContents | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<ViewPrefs>(DEFAULT_PREFS);
+
+  useEffect(() => {
+    setPrefs(DEFAULT_PREFS);
+  }, [libraryId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +66,15 @@ export default function LibraryView({
       cancelled = true;
     };
   }, [libraryId, progressTick]);
+
+  const sortedGroups = useMemo(
+    () => applyGroupPrefs(contents?.groups ?? [], prefs),
+    [contents, prefs],
+  );
+  const sortedTopItems = useMemo(
+    () => applyItemPrefs(contents?.topItems ?? [], prefs),
+    [contents, prefs],
+  );
 
   if (error) {
     return (
@@ -82,6 +103,12 @@ export default function LibraryView({
     library.kind === "movies"
       ? topItems.length === 0
       : groups.length === 0 && topItems.length === 0;
+  const showControls = !empty;
+  const filteredEmpty =
+    !empty &&
+    (library.kind === "movies"
+      ? sortedTopItems.length === 0
+      : sortedGroups.length === 0 && sortedTopItems.length === 0);
 
   return (
     <div className="space-y-6 px-8 py-6">
@@ -94,6 +121,9 @@ export default function LibraryView({
             {library.rootPath}
           </p>
         </div>
+        {showControls ? (
+          <ViewControls prefs={prefs} onChange={setPrefs} />
+        ) : null}
       </header>
 
       {!library.available ? (
@@ -112,9 +142,15 @@ export default function LibraryView({
           title="Nothing here yet"
           description="Run a scan from Settings to index this library."
         />
+      ) : filteredEmpty ? (
+        <EmptyState
+          icon={<Inbox size={20} />}
+          title="No matches"
+          description="No items match the current filter."
+        />
       ) : library.kind === "movies" ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {topItems.map((item) => (
+          {sortedTopItems.map((item) => (
             <MovieCard
               key={item.id}
               title={item.title}
@@ -127,13 +163,13 @@ export default function LibraryView({
         </div>
       ) : (
         <>
-          {topItems.length > 0 ? (
+          {sortedTopItems.length > 0 ? (
             <section className="space-y-3">
               <h2 className="text-base font-semibold text-(--color-text-primary)">
                 Loose items
               </h2>
               <div className="-mx-1 flex flex-wrap gap-4 px-1">
-                {topItems.map((item) => (
+                {sortedTopItems.map((item) => (
                   <ItemCard
                     key={item.id}
                     title={item.title}
@@ -146,7 +182,7 @@ export default function LibraryView({
             </section>
           ) : null}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {groups.map((group) => (
+            {sortedGroups.map((group) => (
               <GroupCard
                 key={group.id}
                 title={group.title}

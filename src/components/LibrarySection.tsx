@@ -18,7 +18,10 @@ export default function LibrarySection({
   className,
 }: LibrarySectionProps) {
   return (
-    <section className={cn("space-y-3", className)}>
+    <section
+      className={cn("space-y-3", className)}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "1px 280px" }}
+    >
       <header className="flex items-end justify-between gap-4">
         <h2 className="text-lg font-semibold text-(--color-text-primary)">{title}</h2>
         {seeAllHref ? (

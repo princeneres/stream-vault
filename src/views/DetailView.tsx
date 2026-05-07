@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
@@ -12,6 +12,7 @@ import Button from "@/components/Button";
 import EmptyState from "@/components/EmptyState";
 import IconButton from "@/components/IconButton";
 import ItemCard from "@/components/ItemCard";
+import ViewControls from "@/components/ViewControls";
 import {
   convertFileSrc,
   getGroup,
@@ -23,6 +24,11 @@ import {
   setItemCompleted,
 } from "@/lib/api";
 import type { Group, GroupDetail, ItemWithProgress } from "@/lib/types";
+import {
+  applyItemPrefs,
+  DEFAULT_PREFS,
+  type ViewPrefs,
+} from "@/lib/viewPrefs";
 
 export interface DetailViewProps {
   groupId: number;
@@ -53,13 +59,16 @@ function episodeLabel(item: ItemWithProgress): string | undefined {
 function ItemGrid({
   items,
   onToggle,
+  prefs,
 }: {
   items: ItemWithProgress[];
   onToggle: (item: ItemWithProgress, next: boolean) => void;
+  prefs: ViewPrefs;
 }) {
+  const sorted = useMemo(() => applyItemPrefs(items, prefs), [items, prefs]);
   return (
     <div className="-mx-1 flex flex-wrap gap-4 px-1">
-      {items.map((item) => {
+      {sorted.map((item: ItemWithProgress) => {
         const ep = episodeLabel(item);
         const completed = item.progress?.completed === true;
         return (
@@ -85,12 +94,14 @@ const SubgroupSection = memo(function SubgroupSection({
   refreshTick,
   onItemToggle,
   onGroupToggle,
+  prefs,
 }: {
   group: Group;
   depth?: number;
   refreshTick: number;
   onItemToggle: (item: ItemWithProgress, next: boolean) => void;
   onGroupToggle: (group: Group, next: boolean) => void;
+  prefs: ViewPrefs;
 }) {
   const [open, setOpen] = useState(depth === 0);
   const [detail, setDetail] = useState<GroupDetail | null>(null);
@@ -149,7 +160,11 @@ const SubgroupSection = memo(function SubgroupSection({
         detail ? (
           <div className="space-y-6">
             {detail.items.length > 0 ? (
-              <ItemGrid items={detail.items} onToggle={onItemToggle} />
+              <ItemGrid
+                items={detail.items}
+                onToggle={onItemToggle}
+                prefs={prefs}
+              />
             ) : null}
             {detail.subgroups.map((sg) => (
               <SubgroupSection
@@ -159,6 +174,7 @@ const SubgroupSection = memo(function SubgroupSection({
                 refreshTick={refreshTick}
                 onItemToggle={onItemToggle}
                 onGroupToggle={onGroupToggle}
+                prefs={prefs}
               />
             ))}
             {isEmpty ? (
@@ -178,6 +194,11 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<ViewPrefs>(DEFAULT_PREFS);
+
+  useEffect(() => {
+    setPrefs(DEFAULT_PREFS);
+  }, [groupId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -360,13 +381,21 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
       </header>
       <div className="space-y-8 px-8">
 
-      {items.length > 0 ? (
-        <section className="space-y-3">
+      {items.length > 0 || subgroups.length > 0 ? (
+        <div className="flex items-center justify-between gap-4">
           <h2 className="text-base font-semibold text-(--color-text-primary)">
-            Items
+            Contents
           </h2>
-          <ItemGrid items={items} onToggle={handleItemToggle} />
-        </section>
+          <ViewControls prefs={prefs} onChange={setPrefs} />
+        </div>
+      ) : null}
+
+      {items.length > 0 ? (
+        <ItemGrid
+          items={items}
+          onToggle={handleItemToggle}
+          prefs={prefs}
+        />
       ) : null}
 
       {subgroups.map((sg) => (
@@ -376,6 +405,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
           refreshTick={combinedTick}
           onItemToggle={handleItemToggle}
           onGroupToggle={handleGroupToggle}
+          prefs={prefs}
         />
       ))}
 

@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
-import { Library as LibraryIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  Library as LibraryIcon,
+  PlayCircle,
+} from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
@@ -40,6 +44,34 @@ function movieStatus(item: ItemWithProgress): MovieStatus {
   if (item.progress?.completed) return "watched";
   if (item.progress) return "in-progress";
   return "unwatched";
+}
+
+function episodeLabel(item: ItemWithProgress): string | null {
+  if (item.seasonNumber != null && item.episodeNumber != null) {
+    const s = String(item.seasonNumber).padStart(2, "0");
+    const e = String(item.episodeNumber).padStart(2, "0");
+    return `S${s}E${e}`;
+  }
+  return null;
+}
+
+function remainingLabel(item: ItemWithProgress): string | null {
+  if (!item.progress || !item.durationSeconds) return null;
+  const remaining = item.durationSeconds - item.progress.positionSeconds;
+  if (remaining <= 30) return "Almost done";
+  if (remaining < 60) return `${Math.round(remaining)} sec left`;
+  const min = Math.round(remaining / 60);
+  if (min < 60) return `${min} min left`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h} h left` : `${h} h ${m} m left`;
+}
+
+function continueSubtitle(item: ItemWithProgress): string | undefined {
+  const parts = [episodeLabel(item), remainingLabel(item)].filter(
+    (x): x is string => x !== null,
+  );
+  return parts.length ? parts.join(" · ") : undefined;
 }
 
 export default function Home({
@@ -94,6 +126,27 @@ export default function Home({
     };
   }, [libraries]);
 
+  const stats = useMemo(() => {
+    let total = 0;
+    let completed = 0;
+    for (const lib of Object.values(perLibrary)) {
+      for (const g of lib.groups) {
+        total += g.itemCount;
+        completed += g.completedCount;
+      }
+      for (const item of lib.topItems) {
+        total += 1;
+        if (item.progress?.completed) completed += 1;
+      }
+    }
+    return {
+      libraries: libraries.length,
+      total,
+      completed,
+      inProgress: continueWatching.length,
+    };
+  }, [perLibrary, libraries.length, continueWatching.length]);
+
   if (libraries.length === 0) {
     return (
       <div className="px-8 py-10">
@@ -108,12 +161,31 @@ export default function Home({
 
   return (
     <div className="space-y-10 px-8 py-6">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          icon={<LibraryIcon size={16} aria-hidden />}
+          label="Libraries"
+          value={stats.libraries}
+        />
+        <StatCard
+          icon={<PlayCircle size={16} aria-hidden />}
+          label="In progress"
+          value={stats.inProgress}
+        />
+        <StatCard
+          icon={<CheckCircle2 size={16} aria-hidden />}
+          label="Watched"
+          value={stats.completed}
+        />
+        <StatCard label="Total items" value={stats.total} />
+      </section>
       {continueWatching.length > 0 ? (
         <LibrarySection title="Continue Watching">
           {continueWatching.map((item) => (
             <ItemCard
               key={item.id}
               title={item.title}
+              subtitle={continueSubtitle(item)}
               thumbnail={thumbSrc(item.thumbnailPath)}
               progressPercent={progressPercent(item)}
               onClick={() => playItem(item.id)}
@@ -181,6 +253,32 @@ export default function Home({
           </LibrarySection>
         );
       })}
+    </div>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+      {icon ? (
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-(--radius-pill) bg-(--color-surface-raised) text-(--color-accent)">
+          {icon}
+        </span>
+      ) : null}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-(--color-text-secondary)">{label}</p>
+        <p className="tabular-nums text-xl font-semibold text-(--color-text-primary)">
+          {value}
+        </p>
+      </div>
     </div>
   );
 }
