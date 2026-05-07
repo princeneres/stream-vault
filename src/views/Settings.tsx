@@ -8,11 +8,13 @@ import {
   Trash2,
 } from "lucide-react";
 import Button from "@/components/Button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import IconButton from "@/components/IconButton";
 import Input from "@/components/Input";
 import KindIcon from "@/components/KindIcon";
 import Modal from "@/components/Modal";
 import Select from "@/components/Select";
+import { useToast } from "@/components/Toast";
 import {
   addLibrary,
   getSetting,
@@ -30,25 +32,18 @@ const KIND_OPTIONS: { value: LibraryKind; label: string }[] = [
   { value: "generic", label: "Generic" },
 ];
 
-interface Toast {
-  id: number;
-  message: string;
-  tone: "success" | "error";
-}
-
 export interface SettingsProps {
   /** Bumped when libraries are added/removed/scanned, so the App can refresh. */
   onLibrariesChanged: () => void;
 }
-
-let toastSeq = 0;
 
 export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { push: pushToast } = useToast();
+  const confirm = useConfirm();
 
   const refreshLibraries = async () => {
     try {
@@ -71,14 +66,6 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
     })();
   }, []);
 
-  const pushToast = (message: string, tone: Toast["tone"]) => {
-    const id = ++toastSeq;
-    setToasts((t) => [...t, { id, message, tone }]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-    }, 4000);
-  };
-
   const handleScan = async (lib: Library) => {
     setScanningId(lib.id);
     try {
@@ -97,9 +84,13 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
   };
 
   const handleRemove = async (lib: Library) => {
-    if (!window.confirm(`Remove library "${lib.name}"? This cannot be undone.`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Remove library",
+      message: `Remove library "${lib.name}"? This cannot be undone.`,
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await removeLibrary(lib.id);
       pushToast(`Removed "${lib.name}"`, "success");
@@ -201,22 +192,44 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
         <h2 className="text-base font-semibold text-(--color-text-primary)">
           Playback
         </h2>
-        <label className="flex items-center justify-between gap-4 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium text-(--color-text-primary)">
+        <div className="flex items-center justify-between gap-4 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+          <div className="space-y-0.5">
+            <p
+              id="auto-advance-label"
+              className="text-sm font-medium text-(--color-text-primary)"
+            >
               Auto-advance
-            </span>
-            <span className="block text-xs text-(--color-text-secondary)">
+            </p>
+            <p
+              id="auto-advance-desc"
+              className="text-xs text-(--color-text-secondary)"
+            >
               Play the next item automatically when one finishes.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            checked={autoAdvance}
-            onChange={(e) => handleAutoAdvance(e.target.checked)}
-            className="h-4 w-4 accent-(--color-accent)"
-          />
-        </label>
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoAdvance}
+            aria-labelledby="auto-advance-label"
+            aria-describedby="auto-advance-desc"
+            onClick={() => handleAutoAdvance(!autoAdvance)}
+            className={
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-(--radius-pill) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) focus-visible:ring-offset-2 focus-visible:ring-offset-(--color-bg) " +
+              (autoAdvance
+                ? "bg-(--color-accent)"
+                : "bg-(--color-surface-hover)")
+            }
+          >
+            <span
+              aria-hidden
+              className={
+                "inline-block h-3.5 w-3.5 transform rounded-(--radius-pill) bg-(--color-text-primary) transition-transform " +
+                (autoAdvance ? "translate-x-5" : "translate-x-1")
+              }
+            />
+          </button>
+        </div>
       </section>
 
       <AddLibraryModal
@@ -229,22 +242,6 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
         }}
         onError={(e) => pushToast(`Add failed: ${e}`, "error")}
       />
-
-      <div className="pointer-events-none fixed bottom-6 right-6 z-50 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={
-              "pointer-events-auto rounded-(--radius-card) px-4 py-2 text-sm shadow-(--shadow-modal) " +
-              (t.tone === "error"
-                ? "bg-(--color-danger) text-(--color-text-inverse)"
-                : "bg-(--color-surface-raised) text-(--color-text-primary) border border-(--color-border-subtle)")
-            }
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

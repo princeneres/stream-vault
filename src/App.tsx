@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import CommandPalette from "@/components/CommandPalette";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
+import { ToastProvider } from "@/components/Toast";
 import { listLibraries, onItemProgress } from "@/lib/api";
 import type { Library } from "@/lib/types";
 import DetailView from "@/views/DetailView";
@@ -102,6 +105,71 @@ export default function App() {
   };
 
   return (
+    <ToastProvider>
+      <ConfirmProvider>
+        <AppShell
+          sidebarItems={sidebarItems}
+          activeId={activeId}
+          onSelect={handleSelect}
+          view={view}
+          libraries={libraries}
+          progressTick={progressTick}
+          setView={setView}
+          refreshLibraries={refreshLibraries}
+        />
+      </ConfirmProvider>
+    </ToastProvider>
+  );
+}
+
+interface AppShellProps {
+  sidebarItems: SidebarItem[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  view: View;
+  libraries: Library[];
+  progressTick: number;
+  setView: (v: View) => void;
+  refreshLibraries: () => Promise<void>;
+}
+
+function AppShell({
+  sidebarItems,
+  activeId,
+  onSelect,
+  view,
+  libraries,
+  progressTick,
+  setView,
+  refreshLibraries,
+}: AppShellProps) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (paletteOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "/") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [paletteOpen]);
+
+  return (
     <div className="flex h-screen bg-(--color-bg) text-(--color-text-primary)">
       <a href="#main" className="skip-link">
         Skip to main content
@@ -109,7 +177,16 @@ export default function App() {
       <Sidebar
         items={sidebarItems}
         activeId={activeId}
-        onSelect={handleSelect}
+        onSelect={onSelect}
+        onSearch={() => setPaletteOpen(true)}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenGroup={(id) => {
+          setView({ kind: "group", id });
+          setPaletteOpen(false);
+        }}
       />
       <main id="main" className="flex-1 overflow-y-auto">
         {view.kind === "home" ? (
