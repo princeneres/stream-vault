@@ -129,6 +129,12 @@ fn make_socket_path(item_id: i64) -> PathBuf {
     PathBuf::from(format!("/tmp/streamvault-{item_id}-{ts}.sock"))
 }
 
+/// Custom key binding name registered with mpv at session start. Triggering
+/// it (Alt+n by default) makes mpv emit a `client-message` event with this
+/// arg, which `progress_loop` translates into the `note-capture-requested`
+/// Tauri event.
+const NOTE_CAPTURE_MESSAGE: &str = "streamvault-capture-note";
+
 #[cfg(target_os = "linux")]
 async fn progress_loop(
     socket_path: PathBuf,
@@ -151,6 +157,16 @@ async fn progress_loop(
     let mut request_id: u64 = 0;
     let mut last_position = 0f64;
     let mut last_duration = 0f64;
+
+    // Bind Alt+n inside mpv to a script-message we recognize. Without this,
+    // the key never reaches our app because mpv's window has focus during
+    // playback and intercepts everything.
+    let bind_cmd = format!(
+        "{{\"command\":[\"keybind\",\"Alt+n\",\"script-message {NOTE_CAPTURE_MESSAGE}\"],\"request_id\":7000}}\n"
+    );
+    if let Err(e) = write.write_all(bind_cmd.as_bytes()).await {
+        log::warn!("mpv keybind write failed: {e}");
+    }
 
     loop {
         request_id += 1;
@@ -189,7 +205,9 @@ async fn progress_loop(
                             return;
                         }
                         Ok(_) => {
-                            if let Some((id, val)) = parse_property_response(&line) {
+                            if is_note_capture_event(&line) {
+                                let _ = app.emit("note-capture-requested", ());
+                            } else if let Some((id, val)) = parse_property_response(&line) {
                                 if id == pos_id {
                                     last_position = val;
                                     got_pos = true;
@@ -327,6 +345,25 @@ pub(crate) fn parse_property_response(line: &str) -> Option<(u64, f64)> {
     let id = v.get("request_id")?.as_u64()?;
     let data = v.get("data")?.as_f64()?;
     Some((id, data))
+}
+
+/// True when `line` is mpv's `client-message` event carrying our
+/// `streamvault-capture-note` arg — fired when the user presses the bound
+/// note-capture hotkey while mpv has focus.
+pub(crate) fn is_note_capture_event(line: &str) -> bool {
+    let v: Value = match serde_json::from_str(line.trim()) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if v.get("event").and_then(Value::as_str) != Some("client-message") {
+        return false;
+    }
+    let args = match v.get("args").and_then(Value::as_array) {
+        Some(a) => a,
+        None => return false,
+    };
+    args.iter()
+        .any(|a| a.as_str() == Some(NOTE_CAPTURE_MESSAGE))
 }
 
 // ---- Ad-hoc IPC commands (note capture, click-to-seek) -------------------
@@ -493,6 +530,26 @@ mod tests {
     fn parse_response_rejects_null_data() {
         let line = r#"{"data": null, "request_id": 1, "error": "property unavailable"}"#;
         assert_eq!(parse_property_response(line), None);
+    }
+
+    #[test]
+    fn note_capture_event_recognized() {
+        let line =
+            r#"{"event":"client-message","args":["streamvault-capture-note"]}"#;
+        assert!(is_note_capture_event(line));
+    }
+
+    #[test]
+    fn note_capture_event_ignores_other_messages() {
+        assert!(!is_note_capture_event(
+            r#"{"event":"client-message","args":["other"]}"#
+        ));
+        assert!(!is_note_capture_event(
+            r#"{"event":"playback-restart"}"#
+        ));
+        assert!(!is_note_capture_event(
+            r#"{"data":12.5,"request_id":7}"#
+        ));
     }
 
     #[test]

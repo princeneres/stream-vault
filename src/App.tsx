@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import CommandPalette from "@/components/CommandPalette";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
@@ -165,8 +166,11 @@ function AppShell({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [captureCtx, setCaptureCtx] = useState<NoteCaptureContext | null>(null);
   const toast = useToast();
+  const captureBusyRef = useRef(false);
 
   const triggerNoteCapture = useCallback(async () => {
+    if (captureBusyRef.current) return;
+    captureBusyRef.current = true;
     try {
       const itemId = await mpvCurrentItemId();
       if (itemId == null) {
@@ -177,12 +181,38 @@ function AppShell({
       mpvSetPaused(true).catch((e) =>
         console.error("mpvSetPaused failed", e),
       );
+      // Bring our window forward so the modal isn't hidden behind mpv.
+      try {
+        const w = getCurrentWindow();
+        await w.setFocus();
+      } catch (e) {
+        console.error("setFocus failed", e);
+      }
       setCaptureCtx({ itemId, timestampSec: pos });
     } catch (e) {
       console.error("note capture trigger failed", e);
       toast.push("Could not start note capture", "error");
+    } finally {
+      captureBusyRef.current = false;
     }
   }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | null = null;
+    listen("note-capture-requested", () => triggerNoteCapture())
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlistenFn = fn;
+      })
+      .catch((e) =>
+        console.error("note-capture-requested subscribe failed", e),
+      );
+    return () => {
+      cancelled = true;
+      if (unlistenFn) unlistenFn();
+    };
+  }, [triggerNoteCapture]);
 
   const closeNoteCapture = useCallback(() => {
     setCaptureCtx(null);
