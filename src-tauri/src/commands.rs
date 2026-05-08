@@ -516,6 +516,7 @@ pub fn add_note(
         return Err("note content cannot be empty".into());
     }
     let note = db.insert_note(item_id, timestamp_sec.max(0.0), trimmed).map_err(cmd_err)?;
+    publish_note_op(&db, &app, crate::vault::VaultOp::Upsert(note.clone()));
     emit_note_saved(&app, "added", item_id, Some(note.id));
     Ok(note)
 }
@@ -533,6 +534,7 @@ pub fn update_note(
         return Err("note content cannot be empty".into());
     }
     let note = db.update_note(note_id, trimmed).map_err(cmd_err)?;
+    publish_note_op(&db, &app, crate::vault::VaultOp::Upsert(note.clone()));
     emit_note_saved(&app, "updated", note.item_id, Some(note.id));
     Ok(note)
 }
@@ -555,8 +557,43 @@ pub fn delete_note(
         .map_err(cmd_err)?
         .unwrap_or(-1);
     db.delete_note(note_id).map_err(cmd_err)?;
+    if item_id_before > 0 {
+        publish_note_op(
+            &db,
+            &app,
+            crate::vault::VaultOp::Delete {
+                item_id: item_id_before,
+                note_id,
+            },
+        );
+    }
     emit_note_saved(&app, "deleted", item_id_before, Some(note_id));
     Ok(())
+}
+
+/// Re-publish every notes-bearing item into the configured Obsidian vault.
+/// Used after the user changes the vault path. Returns the number of items
+/// re-emitted.
+#[tauri::command]
+pub fn republish_vault(db: State<'_, Database>, app: AppHandle) -> CmdResult<u32> {
+    let result = crate::vault::republish_all(db.inner()).map_err(cmd_err)?;
+    let _ = app.emit(
+        "vault-republished",
+        serde_json::json!({ "count": result }),
+    );
+    Ok(result)
+}
+
+/// Best-effort vault publish. Logs warnings + emits a `vault-publish-failed`
+/// event on error; never blocks the DB-side success path.
+fn publish_note_op(db: &Database, app: &AppHandle, op: crate::vault::VaultOp) {
+    if let Err(e) = crate::vault::publish(db, op) {
+        log::warn!("vault publish failed: {e}");
+        let _ = app.emit(
+            "vault-publish-failed",
+            serde_json::json!({ "error": e.to_string() }),
+        );
+    }
 }
 
 #[tauri::command]

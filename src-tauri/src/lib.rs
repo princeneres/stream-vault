@@ -4,6 +4,7 @@ pub mod models;
 pub mod mpv;
 pub mod scanner;
 pub mod thumbnails;
+pub mod vault;
 
 use tauri::Manager;
 
@@ -76,6 +77,7 @@ pub fn run() {
             commands::mpv_set_paused,
             commands::mpv_seek,
             commands::mpv_current_item_id,
+            commands::republish_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

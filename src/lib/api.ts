@@ -154,3 +154,9 @@ export function mpvSeek(seconds: number): Promise<void> {
 export function mpvCurrentItemId(): Promise<number | null> {
   return invoke<number | null>("mpv_current_item_id");
 }
+
+// ---- Obsidian vault -------------------------------------------------------
+
+export function republishVault(): Promise<number> {
+  return invoke<number>("republish_vault");
+}

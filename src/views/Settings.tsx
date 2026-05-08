@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
+  BookOpen,
   Folder,
   Plus,
   RefreshCw,
   Trash2,
+  Upload,
 } from "lucide-react";
 import Button from "@/components/Button";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -20,6 +22,7 @@ import {
   getSetting,
   listLibraries,
   removeLibrary,
+  republishVault,
   scanLibrary,
   setSetting,
 } from "@/lib/api";
@@ -40,6 +43,8 @@ export interface SettingsProps {
 export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [autoAdvance, setAutoAdvance] = useState(false);
+  const [vaultPath, setVaultPath] = useState("");
+  const [republishing, setRepublishing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
   const { push: pushToast } = useToast();
@@ -60,6 +65,14 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       try {
         const v = await getSetting("auto_advance");
         setAutoAdvance(v === "true");
+      } catch (e) {
+        console.error("getSetting failed", e);
+      }
+    })();
+    (async () => {
+      try {
+        const v = await getSetting("obsidian_vault_path");
+        setVaultPath(v ?? "");
       } catch (e) {
         console.error("getSetting failed", e);
       }
@@ -107,6 +120,44 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       await setSetting("auto_advance", next ? "true" : "false");
     } catch (e) {
       pushToast(`Failed to save: ${String(e)}`, "error");
+    }
+  };
+
+  const handlePickVault = async () => {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (typeof selected !== "string") return;
+      setVaultPath(selected);
+      await setSetting("obsidian_vault_path", selected);
+      pushToast("Obsidian vault path saved", "success");
+    } catch (e) {
+      pushToast(`Failed to set vault path: ${String(e)}`, "error");
+    }
+  };
+
+  const handleClearVault = async () => {
+    setVaultPath("");
+    try {
+      await setSetting("obsidian_vault_path", "");
+      pushToast("Obsidian vault disabled", "info");
+    } catch (e) {
+      pushToast(`Failed to clear: ${String(e)}`, "error");
+    }
+  };
+
+  const handleRepublishVault = async () => {
+    if (!vaultPath) return;
+    setRepublishing(true);
+    try {
+      const count = await republishVault();
+      pushToast(
+        `Republished ${count} item${count === 1 ? "" : "s"} to vault`,
+        "success",
+      );
+    } catch (e) {
+      pushToast(`Republish failed: ${String(e)}`, "error");
+    } finally {
+      setRepublishing(false);
     }
   };
 
@@ -229,6 +280,66 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
               }
             />
           </button>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-base font-semibold text-(--color-text-primary)">
+          Notes & Obsidian
+        </h2>
+        <div className="space-y-3 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius-pill) bg-(--color-surface-raised) text-(--color-text-secondary)">
+              <BookOpen size={16} aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p className="text-sm font-medium text-(--color-text-primary)">
+                Obsidian vault
+              </p>
+              <p className="text-xs text-(--color-text-secondary)">
+                Each note is mirrored as Markdown under{" "}
+                <code className="rounded bg-(--color-surface-raised) px-1 py-0.5 text-[11px]">
+                  StreamVault/
+                </code>{" "}
+                inside the chosen vault. Leave empty to keep notes local-only.
+              </p>
+              {vaultPath ? (
+                <p className="truncate text-xs text-(--color-text-muted)">
+                  {vaultPath}
+                </p>
+              ) : (
+                <p className="text-xs text-(--color-text-muted)">
+                  Not configured.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={<Folder size={14} />}
+              onClick={handlePickVault}
+            >
+              {vaultPath ? "Change folder" : "Choose folder"}
+            </Button>
+            {vaultPath ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                leadingIcon={<Upload size={14} />}
+                onClick={handleRepublishVault}
+                disabled={republishing}
+              >
+                {republishing ? "Republishing…" : "Republish all notes"}
+              </Button>
+            ) : null}
+            {vaultPath ? (
+              <Button variant="ghost" size="sm" onClick={handleClearVault}>
+                Disable
+              </Button>
+            ) : null}
+          </div>
         </div>
       </section>
 

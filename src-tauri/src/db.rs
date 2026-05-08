@@ -845,6 +845,19 @@ impl Database {
         })
     }
 
+    pub fn get_item_uuid(&self, id: i64) -> Result<Option<String>> {
+        self.with_conn(|c| {
+            let v: Option<Option<String>> = c
+                .query_row(
+                    "SELECT item_uuid FROM items WHERE id = ?",
+                    [id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+            Ok(v.flatten())
+        })
+    }
+
     // -- Notes -------------------------------------------------------------
 
     pub fn insert_note(
