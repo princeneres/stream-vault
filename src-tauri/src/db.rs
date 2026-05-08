@@ -111,10 +111,20 @@ CREATE TABLE IF NOT EXISTS settings (
 /// Migration V1: stable `item_uuid` on every item (drives Obsidian publishing
 /// independently of `id` / file_path) + `notes` table for timestamped notes.
 /// Idempotent and gated by `PRAGMA user_version`.
+///
+/// SQLite's `ALTER TABLE ADD COLUMN` rejects non-constant DEFAULTs, so the
+/// uuid column is added nullable and a post-insert trigger fills it for new
+/// rows — existing rows are backfilled inline.
 const MIGRATION_V1_NOTES: &str = r#"
-ALTER TABLE items ADD COLUMN item_uuid TEXT DEFAULT (lower(hex(randomblob(16))));
+ALTER TABLE items ADD COLUMN item_uuid TEXT;
 UPDATE items SET item_uuid = lower(hex(randomblob(16))) WHERE item_uuid IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_items_uuid ON items(item_uuid);
+CREATE TRIGGER IF NOT EXISTS items_uuid_default
+    AFTER INSERT ON items
+    WHEN NEW.item_uuid IS NULL
+BEGIN
+    UPDATE items SET item_uuid = lower(hex(randomblob(16))) WHERE id = NEW.id;
+END;
 
 CREATE TABLE IF NOT EXISTS notes (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1155,6 +1165,30 @@ mod tests {
         let one = db.get_group_by_id(parent.id).unwrap().unwrap();
         assert_eq!(one.item_count, 3);
         assert_eq!(one.completed_count, 1);
+    }
+
+    #[test]
+    fn item_uuid_trigger_fills_on_insert() {
+        let (_d, db) = fresh();
+        let lib = db
+            .insert_library("L", "/tmp/uuidtest", LibraryKind::Movies)
+            .unwrap();
+        let item = db
+            .upsert_item_by_file_path(
+                lib.id,
+                None,
+                "M",
+                1,
+                "/tmp/uuidtest/m.mp4",
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let uuid = db.get_item_uuid(item.id).unwrap();
+        assert!(uuid.is_some(), "trigger should fill uuid");
+        assert_eq!(uuid.as_deref().map(str::len), Some(32));
     }
 
     #[test]
