@@ -1,18 +1,32 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ImagePlus,
   Layers,
+  Locate,
   Play,
   RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 import Button from "@/components/Button";
 import EmptyState from "@/components/EmptyState";
 import IconButton from "@/components/IconButton";
+import Input from "@/components/Input";
 import ItemCard from "@/components/ItemCard";
 import ViewControls from "@/components/ViewControls";
+import { cn } from "@/components/cn";
 import {
   convertFileSrc,
   getGroup,
@@ -35,6 +49,8 @@ export interface DetailViewProps {
   /** Bumped by the App when item-progress fires; refetches detail. */
   progressTick: number;
 }
+
+type TreeCache = Map<number, GroupDetail>;
 
 function thumbSrc(path: string | null | undefined): string | undefined {
   return path ? convertFileSrc(path) : undefined;
@@ -91,6 +107,10 @@ function ItemGrid({
 const SubgroupSection = memo(function SubgroupSection({
   group,
   depth = 0,
+  expanded,
+  onSetExpanded,
+  cache,
+  onLoaded,
   refreshTick,
   onItemToggle,
   onGroupToggle,
@@ -98,13 +118,17 @@ const SubgroupSection = memo(function SubgroupSection({
 }: {
   group: Group;
   depth?: number;
+  expanded: Set<number>;
+  onSetExpanded: (updater: (prev: Set<number>) => Set<number>) => void;
+  cache: TreeCache;
+  onLoaded: (detail: GroupDetail) => void;
   refreshTick: number;
   onItemToggle: (item: ItemWithProgress, next: boolean) => void;
   onGroupToggle: (group: Group, next: boolean) => void;
   prefs: ViewPrefs;
 }) {
-  const [open, setOpen] = useState(depth === 0);
-  const [detail, setDetail] = useState<GroupDetail | null>(null);
+  const open = expanded.has(group.id);
+  const detail = cache.get(group.id) ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -112,7 +136,7 @@ const SubgroupSection = memo(function SubgroupSection({
     (async () => {
       try {
         const result = await getGroup(group.id);
-        if (!cancelled) setDetail(result);
+        if (!cancelled) onLoaded(result);
       } catch (e) {
         console.error(`getGroup(${group.id}) failed`, e);
       }
@@ -120,7 +144,16 @@ const SubgroupSection = memo(function SubgroupSection({
     return () => {
       cancelled = true;
     };
-  }, [open, group.id, refreshTick]);
+  }, [open, group.id, refreshTick, onLoaded]);
+
+  const toggleOpen = useCallback(() => {
+    onSetExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(group.id)) next.delete(group.id);
+      else next.add(group.id);
+      return next;
+    });
+  }, [group.id, onSetExpanded]);
 
   const isEmpty =
     detail !== null &&
@@ -144,7 +177,7 @@ const SubgroupSection = memo(function SubgroupSection({
         />
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggleOpen}
           className="flex flex-1 items-center gap-2 text-left text-base font-semibold text-(--color-text-primary) hover:text-(--color-accent)"
         >
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -171,6 +204,10 @@ const SubgroupSection = memo(function SubgroupSection({
                 key={sg.id}
                 group={sg}
                 depth={depth + 1}
+                expanded={expanded}
+                onSetExpanded={onSetExpanded}
+                cache={cache}
+                onLoaded={onLoaded}
                 refreshTick={refreshTick}
                 onItemToggle={onItemToggle}
                 onGroupToggle={onGroupToggle}
@@ -189,15 +226,94 @@ const SubgroupSection = memo(function SubgroupSection({
   );
 });
 
+interface FlatMatch {
+  kind: "group" | "item";
+  group?: Group;
+  item?: ItemWithProgress;
+  /** Title path joined with " / " for context display. */
+  pathLabel: string;
+  /** Ancestor group IDs from immediate parent to root, used by reveal. */
+  ancestorIds: number[];
+}
+
+function collectMatches(
+  rootId: number,
+  cache: TreeCache,
+  query: string,
+): FlatMatch[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const out: FlatMatch[] = [];
+  const visit = (id: number, titlePath: string[], ancestorIds: number[]) => {
+    const detail = cache.get(id);
+    if (!detail) return;
+    for (const item of detail.items) {
+      if (item.title.toLowerCase().includes(q)) {
+        out.push({
+          kind: "item",
+          item,
+          pathLabel: titlePath.join(" / "),
+          ancestorIds,
+        });
+      }
+    }
+    for (const sg of detail.subgroups) {
+      const childPath = [...titlePath, sg.title];
+      const childAncestors = [sg.id, ...ancestorIds];
+      if (sg.title.toLowerCase().includes(q)) {
+        out.push({
+          kind: "group",
+          group: sg,
+          pathLabel: titlePath.join(" / ") || detail.group.title,
+          ancestorIds,
+        });
+      }
+      visit(sg.id, childPath, childAncestors);
+    }
+  };
+  const root = cache.get(rootId);
+  if (!root) return out;
+  visit(rootId, [], []);
+  return out;
+}
+
+function collectAllGroupIds(rootId: number, cache: TreeCache): number[] {
+  const out: number[] = [];
+  const visit = (id: number) => {
+    const detail = cache.get(id);
+    if (!detail) return;
+    for (const sg of detail.subgroups) {
+      out.push(sg.id);
+      visit(sg.id);
+    }
+  };
+  visit(rootId);
+  return out;
+}
+
 export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const [detail, setDetail] = useState<GroupDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<ViewPrefs>(DEFAULT_PREFS);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [cache, setCache] = useState<TreeCache>(new Map());
+  const [query, setQuery] = useState("");
+  const cacheRef = useRef<TreeCache>(cache);
+  const seededRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    cacheRef.current = cache;
+  }, [cache]);
 
   useEffect(() => {
     setPrefs(DEFAULT_PREFS);
+    setExpanded(new Set());
+    setCache(new Map());
+    setQuery("");
+    seededRef.current = false;
   }, [groupId]);
 
   useEffect(() => {
@@ -216,7 +332,55 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     };
   }, [groupId, progressTick, refreshTick]);
 
+  // Seed root in cache + auto-expand top-level subgroups once.
+  useEffect(() => {
+    if (!detail) return;
+    setCache((prev) => {
+      const next = new Map(prev);
+      next.set(detail.group.id, detail);
+      return next;
+    });
+    if (!seededRef.current) {
+      seededRef.current = true;
+      setExpanded((prev) => {
+        if (prev.size > 0) return prev;
+        const next = new Set<number>();
+        for (const sg of detail.subgroups) next.add(sg.id);
+        return next;
+      });
+    }
+  }, [detail]);
+
   const bumpRefresh = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  const cacheLoaded = useCallback((d: GroupDetail) => {
+    setCache((prev) => {
+      const next = new Map(prev);
+      next.set(d.group.id, d);
+      return next;
+    });
+  }, []);
+
+  const loadGroupCached = useCallback(async (id: number): Promise<GroupDetail> => {
+    const hit = cacheRef.current.get(id);
+    if (hit) return hit;
+    const fresh = await getGroup(id);
+    cacheRef.current = new Map(cacheRef.current).set(id, fresh);
+    setCache(cacheRef.current);
+    return fresh;
+  }, []);
+
+  const loadFullSubtree = useCallback(async () => {
+    const queue: number[] = [groupId];
+    const visited = new Set<number>();
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      const d = await loadGroupCached(id);
+      for (const sg of d.subgroups) queue.push(sg.id);
+    }
+  }, [groupId, loadGroupCached]);
 
   const handlePlayNext = useCallback(async () => {
     try {
@@ -280,6 +444,107 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     }
   }, []);
 
+  const handleExpandAll = useCallback(async () => {
+    try {
+      setBusyAction("expand-all");
+      await loadFullSubtree();
+      const all = collectAllGroupIds(groupId, cacheRef.current);
+      setExpanded(new Set(all));
+    } catch (e) {
+      console.error("expand all failed", e);
+    } finally {
+      setBusyAction(null);
+    }
+  }, [groupId, loadFullSubtree]);
+
+  const handleCollapseAll = useCallback(() => {
+    setExpanded(new Set());
+  }, []);
+
+  const handleRevealNext = useCallback(async () => {
+    try {
+      setBusyAction("reveal-next");
+      const next = await getNextItem(groupId);
+      if (!next || next.groupId == null) return;
+      const path: number[] = [];
+      let cursor: number | null = next.groupId;
+      while (cursor != null && cursor !== groupId) {
+        const d = await loadGroupCached(cursor);
+        path.push(cursor);
+        cursor = d.group.parentGroupId;
+      }
+      setExpanded((prev) => {
+        const out = new Set(prev);
+        for (const id of path) out.add(id);
+        return out;
+      });
+    } catch (e) {
+      console.error("reveal next failed", e);
+    } finally {
+      setBusyAction(null);
+    }
+  }, [groupId, loadGroupCached]);
+
+  const handleRevealGroup = useCallback(
+    async (targetId: number, ancestorIds: number[]) => {
+      try {
+        for (const id of ancestorIds) {
+          await loadGroupCached(id);
+        }
+        setExpanded((prev) => {
+          const out = new Set(prev);
+          for (const id of ancestorIds) out.add(id);
+          out.add(targetId);
+          return out;
+        });
+        setQuery("");
+      } catch (e) {
+        console.error("reveal group failed", e);
+      }
+    },
+    [loadGroupCached],
+  );
+
+  const handlePlayItem = useCallback(async (itemId: number) => {
+    try {
+      await playItem(itemId);
+      setQuery("");
+    } catch (e) {
+      console.error("playItem failed", e);
+    }
+  }, []);
+
+  const trimmedQuery = query.trim();
+  const searchActive = trimmedQuery.length > 0;
+  const allLoaded = useMemo(() => {
+    if (!detail) return false;
+    const groups = collectAllGroupIds(groupId, cache);
+    return groups.every((id) => cache.has(id));
+  }, [groupId, cache, detail]);
+
+  // Auto-load subtree once when search becomes active.
+  useEffect(() => {
+    if (!searchActive) return;
+    if (allLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadFullSubtree();
+        if (cancelled) return;
+      } catch (e) {
+        console.error("subtree load failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchActive, allLoaded, loadFullSubtree]);
+
+  const matches = useMemo(
+    () => (searchActive ? collectMatches(groupId, cache, trimmedQuery) : []),
+    [searchActive, groupId, cache, trimmedQuery],
+  );
+
   if (error) {
     return (
       <div className="px-8 py-10">
@@ -304,6 +569,9 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const { group, subgroups, items } = detail;
   const poster = thumbSrc(group.posterPath);
   const combinedTick = progressTick + refreshTick;
+  const hasContents = items.length > 0 || subgroups.length > 0;
+  const expandAllBusy = busyAction === "expand-all";
+  const revealBusy = busyAction === "reveal-next";
 
   return (
     <div className="space-y-8">
@@ -379,44 +647,247 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
           </div>
         </div>
       </header>
-      <div className="space-y-8 px-8">
+      <div className="space-y-6 px-8">
+        {hasContents ? (
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-(--color-text-primary)">
+                Contents
+              </h2>
+              <ViewControls prefs={prefs} onChange={setPrefs} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                ref={searchInputRef}
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder="Search this course…"
+                aria-label="Search items and folders in this group"
+                spellCheck={false}
+                autoComplete="off"
+                className="w-64"
+                leadingIcon={<Search size={14} aria-hidden />}
+                trailingIcon={
+                  query ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuery("");
+                        searchInputRef.current?.focus();
+                      }}
+                      aria-label="Clear search"
+                      className="text-(--color-text-muted) hover:text-(--color-text-primary)"
+                    >
+                      <X size={14} />
+                    </button>
+                  ) : undefined
+                }
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                leadingIcon={<Locate size={14} />}
+                onClick={handleRevealNext}
+                disabled={revealBusy}
+              >
+                {revealBusy ? "Locating…" : "Reveal next"}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                leadingIcon={<ChevronsUpDown size={14} />}
+                onClick={handleExpandAll}
+                disabled={expandAllBusy}
+              >
+                {expandAllBusy ? "Loading…" : "Expand all"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                leadingIcon={<ChevronsDownUp size={14} />}
+                onClick={handleCollapseAll}
+                disabled={expanded.size === 0}
+              >
+                Collapse all
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
-      {items.length > 0 || subgroups.length > 0 ? (
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-base font-semibold text-(--color-text-primary)">
-            Contents
-          </h2>
-          <ViewControls prefs={prefs} onChange={setPrefs} />
-        </div>
-      ) : null}
+        {searchActive ? (
+          <SearchResultsPanel
+            matches={matches}
+            loading={!allLoaded}
+            onPlayItem={handlePlayItem}
+            onRevealGroup={handleRevealGroup}
+            query={trimmedQuery}
+          />
+        ) : (
+          <>
+            {items.length > 0 ? (
+              <ItemGrid
+                items={items}
+                onToggle={handleItemToggle}
+                prefs={prefs}
+              />
+            ) : null}
 
-      {items.length > 0 ? (
-        <ItemGrid
-          items={items}
-          onToggle={handleItemToggle}
-          prefs={prefs}
-        />
-      ) : null}
+            {subgroups.map((sg) => (
+              <SubgroupSection
+                key={sg.id}
+                group={sg}
+                expanded={expanded}
+                onSetExpanded={setExpanded}
+                cache={cache}
+                onLoaded={cacheLoaded}
+                refreshTick={combinedTick}
+                onItemToggle={handleItemToggle}
+                onGroupToggle={handleGroupToggle}
+                prefs={prefs}
+              />
+            ))}
 
-      {subgroups.map((sg) => (
-        <SubgroupSection
-          key={sg.id}
-          group={sg}
-          refreshTick={combinedTick}
-          onItemToggle={handleItemToggle}
-          onGroupToggle={handleGroupToggle}
-          prefs={prefs}
-        />
-      ))}
-
-      {items.length === 0 && subgroups.length === 0 ? (
-        <EmptyState
-          icon={<Layers size={20} />}
-          title="Empty group"
-          description="No subgroups or items found in this group."
-        />
-      ) : null}
+            {!hasContents ? (
+              <EmptyState
+                icon={<Layers size={20} />}
+                title="Empty group"
+                description="No subgroups or items found in this group."
+              />
+            ) : null}
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+function SearchResultsPanel({
+  matches,
+  loading,
+  query,
+  onPlayItem,
+  onRevealGroup,
+}: {
+  matches: FlatMatch[];
+  loading: boolean;
+  query: string;
+  onPlayItem: (itemId: number) => void;
+  onRevealGroup: (groupId: number, ancestorIds: number[]) => void;
+}) {
+  const groups = matches.filter((m) => m.kind === "group");
+  const items = matches.filter((m) => m.kind === "item");
+
+  if (loading && matches.length === 0) {
+    return (
+      <p className="px-1 py-6 text-sm text-(--color-text-muted)">Searching…</p>
+    );
+  }
+  if (matches.length === 0) {
+    return (
+      <p className="px-1 py-6 text-sm text-(--color-text-muted)">
+        No matches for “{query}”.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {groups.length > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-(--color-text-muted)">
+            Folders ({groups.length})
+          </h3>
+          <ul className="space-y-1">
+            {groups.map((m) => (
+              <li key={`g:${m.group!.id}`}>
+                <button
+                  type="button"
+                  onClick={() => onRevealGroup(m.group!.id, m.ancestorIds)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-(--radius-control) px-3 py-2 text-left",
+                    "text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)",
+                  )}
+                >
+                  <Layers
+                    size={14}
+                    aria-hidden
+                    className="shrink-0 text-(--color-text-muted)"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {m.group!.title}
+                    </span>
+                    {m.pathLabel ? (
+                      <span className="block truncate text-xs text-(--color-text-muted)">
+                        in {m.pathLabel}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-xs text-(--color-text-muted)">
+                    {m.group!.completedCount} / {m.group!.itemCount}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {items.length > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-(--color-text-muted)">
+            Videos ({items.length})
+          </h3>
+          <ul className="space-y-1">
+            {items.map((m) => {
+              const it = m.item!;
+              const ep = episodeLabel(it);
+              const completed = it.progress?.completed === true;
+              return (
+                <li key={`i:${it.id}`}>
+                  <button
+                    type="button"
+                    onClick={() => onPlayItem(it.id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-(--radius-control) px-3 py-2 text-left",
+                      "text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)",
+                    )}
+                  >
+                    {it.thumbnailPath ? (
+                      <img
+                        src={convertFileSrc(it.thumbnailPath)}
+                        alt=""
+                        width={64}
+                        height={36}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-9 w-16 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-9 w-16 shrink-0 items-center justify-center rounded bg-(--color-surface-raised) text-(--color-text-muted)">
+                        <Play size={14} aria-hidden />
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {it.title}
+                      </span>
+                      <span className="block truncate text-xs text-(--color-text-muted)">
+                        {ep ? `${ep} · ` : ""}
+                        {m.pathLabel || "—"}
+                      </span>
+                    </span>
+                    {completed ? (
+                      <span className="shrink-0 rounded-(--radius-pill) bg-(--color-accent-soft) px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-(--color-accent)">
+                        Watched
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }
