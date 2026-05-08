@@ -47,6 +47,12 @@ impl Database {
     fn migrate(&self) -> Result<()> {
         let guard = self.conn.lock().expect("db mutex poisoned");
         guard.execute_batch(SCHEMA_V1)?;
+        let version: i32 =
+            guard.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version < 1 {
+            guard.execute_batch(MIGRATION_V1_NOTES)?;
+            guard.pragma_update(None, "user_version", 1)?;
+        }
         Ok(())
     }
 }
@@ -102,13 +108,32 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 "#;
 
+/// Migration V1: stable `item_uuid` on every item (drives Obsidian publishing
+/// independently of `id` / file_path) + `notes` table for timestamped notes.
+/// Idempotent and gated by `PRAGMA user_version`.
+const MIGRATION_V1_NOTES: &str = r#"
+ALTER TABLE items ADD COLUMN item_uuid TEXT DEFAULT (lower(hex(randomblob(16))));
+UPDATE items SET item_uuid = lower(hex(randomblob(16))) WHERE item_uuid IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_items_uuid ON items(item_uuid);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id       INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    timestamp_sec REAL    NOT NULL,
+    content       TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notes_item_id ON notes(item_id);
+"#;
+
 // ---- Query layer ----------------------------------------------------------
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::models::{
-    Group, Item, ItemWithProgress, Library, LibraryKind, Progress, SearchResults,
+    Group, Item, ItemWithProgress, Library, LibraryKind, Note, Progress, SearchResults,
 };
 
 fn parse_ts(s: &str) -> DateTime<Utc> {
@@ -212,6 +237,27 @@ fn item_from_row(r: &Row<'_>) -> rusqlite::Result<Item> {
         season_number: r.get("season_number")?,
         episode_number: r.get("episode_number")?,
     })
+}
+
+fn note_from_row(r: &Row<'_>) -> rusqlite::Result<Note> {
+    let created_at_s: String = r.get("created_at")?;
+    let updated_at_s: String = r.get("updated_at")?;
+    Ok(Note {
+        id: r.get("id")?,
+        item_id: r.get("item_id")?,
+        timestamp_sec: r.get("timestamp_sec")?,
+        content: r.get("content")?,
+        created_at: parse_ts(&created_at_s),
+        updated_at: parse_ts(&updated_at_s),
+    })
+}
+
+fn note_by_id_inner(c: &Connection, id: i64) -> Result<Note> {
+    let mut stmt = c.prepare(
+        "SELECT id, item_id, timestamp_sec, content, created_at, updated_at \
+         FROM notes WHERE id = ?",
+    )?;
+    Ok(stmt.query_row([id], note_from_row)?)
 }
 
 fn progress_from_row(r: &Row<'_>) -> rusqlite::Result<Progress> {
@@ -796,6 +842,89 @@ impl Database {
                 groups,
                 items: items_with_progress,
             })
+        })
+    }
+
+    // -- Notes -------------------------------------------------------------
+
+    pub fn insert_note(
+        &self,
+        item_id: i64,
+        timestamp_sec: f64,
+        content: &str,
+    ) -> Result<Note> {
+        self.with_conn(|c| {
+            c.execute(
+                "INSERT INTO notes (item_id, timestamp_sec, content) VALUES (?, ?, ?)",
+                params![item_id, timestamp_sec, content],
+            )?;
+            let id = c.last_insert_rowid();
+            note_by_id_inner(c, id)
+        })
+    }
+
+    pub fn update_note(&self, id: i64, content: &str) -> Result<Note> {
+        self.with_conn(|c| {
+            let updated = c.execute(
+                "UPDATE notes SET content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+                params![content, id],
+            )?;
+            if updated == 0 {
+                return Err(anyhow::anyhow!("note {id} not found"));
+            }
+            note_by_id_inner(c, id)
+        })
+    }
+
+    pub fn delete_note(&self, id: i64) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM notes WHERE id = ?", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn list_notes_for_item(&self, item_id: i64) -> Result<Vec<Note>> {
+        self.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, item_id, timestamp_sec, content, created_at, updated_at \
+                 FROM notes WHERE item_id = ? ORDER BY timestamp_sec, id",
+            )?;
+            let rows = stmt.query_map([item_id], note_from_row)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn count_notes_for_items(
+        &self,
+        item_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, i64>> {
+        if item_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        self.with_conn(|c| {
+            let placeholders = std::iter::repeat("?")
+                .take(item_ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let q = format!(
+                "SELECT item_id, COUNT(*) FROM notes WHERE item_id IN ({placeholders}) GROUP BY item_id"
+            );
+            let mut stmt = c.prepare(&q)?;
+            let params_iter: Vec<&dyn rusqlite::ToSql> =
+                item_ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+            let rows = stmt.query_map(params_iter.as_slice(), |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            let mut out = std::collections::HashMap::new();
+            for r in rows {
+                let (id, n) = r?;
+                out.insert(id, n);
+            }
+            Ok(out)
         })
     }
 

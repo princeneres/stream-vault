@@ -66,6 +66,16 @@ pub fn run() {
             commands::regenerate_library_artwork,
             commands::get_setting,
             commands::set_setting,
+            commands::play_item_at,
+            commands::add_note,
+            commands::update_note,
+            commands::delete_note,
+            commands::list_notes_for_item,
+            commands::count_notes_for_items,
+            commands::mpv_get_position,
+            commands::mpv_set_paused,
+            commands::mpv_seek,
+            commands::mpv_current_item_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Play } from "lucide-react";
+import { Play, StickyNote } from "lucide-react";
 import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
 
@@ -9,6 +9,7 @@ export interface ItemCardProps {
   progressPercent?: number;
   subtitle?: string;
   completed?: boolean;
+  noteCount?: number;
   onToggleCompleted?: (next: boolean) => void;
   onClick?: () => void;
   onPlay?: () => void;
@@ -26,6 +27,7 @@ function ItemCardImpl({
   progressPercent,
   subtitle,
   completed,
+  noteCount,
   onToggleCompleted,
   onClick,
   onPlay,
@@ -102,6 +104,15 @@ function ItemCardImpl({
           <div className="absolute inset-x-0 bottom-0 px-1.5 pb-1.5">
             <ProgressBar value={progressPercent / 100} size="sm" />
           </div>
+        ) : null}
+        {typeof noteCount === "number" && noteCount > 0 ? (
+          <span
+            aria-label={`${noteCount} note${noteCount === 1 ? "" : "s"}`}
+            className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-(--radius-pill) bg-(--color-bg)/85 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-(--color-text-primary)"
+          >
+            <StickyNote size={10} aria-hidden />
+            {noteCount}
+          </span>
         ) : null}
       </div>
       <div className="px-0.5">

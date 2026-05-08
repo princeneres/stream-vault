@@ -4,12 +4,22 @@ import { listen } from "@tauri-apps/api/event";
 import CommandPalette from "@/components/CommandPalette";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
+import NoteCaptureModal, {
+  type NoteCaptureContext,
+} from "@/components/NoteCaptureModal";
 import ShortcutsDialog from "@/components/ShortcutsDialog";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
-import { ToastProvider } from "@/components/Toast";
-import { listLibraries, onItemProgress } from "@/lib/api";
+import { ToastProvider, useToast } from "@/components/Toast";
+import {
+  listLibraries,
+  mpvCurrentItemId,
+  mpvGetPosition,
+  mpvSetPaused,
+  onItemProgress,
+  onNoteSaved,
+} from "@/lib/api";
 import { type Route, useRoute } from "@/lib/router";
-import type { Library } from "@/lib/types";
+import type { Library, NoteSavedEvent } from "@/lib/types";
 import DetailView from "@/views/DetailView";
 import Home from "@/views/Home";
 import LibraryView from "@/views/LibraryView";
@@ -19,6 +29,7 @@ export default function App() {
   const [view, setView] = useRoute();
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [progressTick, setProgressTick] = useState(0);
+  const [notesTick, setNotesTick] = useState(0);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -37,6 +48,7 @@ export default function App() {
     const unlisten: Array<() => void> = [];
     let cancelled = false;
     const bump = () => setProgressTick((t) => t + 1);
+    const bumpNotes = (_e: NoteSavedEvent) => setNotesTick((t) => t + 1);
 
     // Coalesce `library-artwork` bursts: the backend emits roughly every 8
     // generated thumbnails during a scan, which would otherwise refetch every
@@ -57,6 +69,13 @@ export default function App() {
         else unlisten.push(fn);
       })
       .catch((e) => console.error("onItemProgress subscribe failed", e));
+
+    onNoteSaved(bumpNotes)
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten.push(fn);
+      })
+      .catch((e) => console.error("onNoteSaved subscribe failed", e));
 
     listen("library-artwork", artworkBump)
       .then((fn) => {
@@ -110,6 +129,7 @@ export default function App() {
           view={view}
           libraries={libraries}
           progressTick={progressTick}
+          notesTick={notesTick}
           setView={setView}
           refreshLibraries={refreshLibraries}
         />
@@ -125,6 +145,7 @@ interface AppShellProps {
   view: Route;
   libraries: Library[];
   progressTick: number;
+  notesTick: number;
   setView: (v: Route) => void;
   refreshLibraries: () => Promise<void>;
 }
@@ -136,11 +157,37 @@ function AppShell({
   view,
   libraries,
   progressTick,
+  notesTick,
   setView,
   refreshLibraries,
 }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [captureCtx, setCaptureCtx] = useState<NoteCaptureContext | null>(null);
+  const toast = useToast();
+
+  const triggerNoteCapture = useCallback(async () => {
+    try {
+      const itemId = await mpvCurrentItemId();
+      if (itemId == null) {
+        toast.push("Start playing a video to capture a note", "info");
+        return;
+      }
+      const pos = (await mpvGetPosition()) ?? 0;
+      mpvSetPaused(true).catch((e) =>
+        console.error("mpvSetPaused failed", e),
+      );
+      setCaptureCtx({ itemId, timestampSec: pos });
+    } catch (e) {
+      console.error("note capture trigger failed", e);
+      toast.push("Could not start note capture", "error");
+    }
+  }, [toast]);
+
+  const closeNoteCapture = useCallback(() => {
+    setCaptureCtx(null);
+    mpvSetPaused(false).catch((e) => console.error("mpvSetPaused failed", e));
+  }, []);
 
   useEffect(() => {
     let chordTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,7 +202,7 @@ function AppShell({
     };
 
     const onKey = (e: KeyboardEvent) => {
-      if (paletteOpen || shortcutsOpen) return;
+      if (paletteOpen || shortcutsOpen || captureCtx) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -169,6 +216,9 @@ function AppShell({
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
           e.preventDefault();
           setPaletteOpen(true);
+        } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "n") {
+          e.preventDefault();
+          triggerNoteCapture();
         }
         return;
       }
@@ -204,7 +254,7 @@ function AppShell({
       document.removeEventListener("keydown", onKey);
       if (chordTimer) clearTimeout(chordTimer);
     };
-  }, [paletteOpen, shortcutsOpen, setView, view.kind]);
+  }, [paletteOpen, shortcutsOpen, captureCtx, setView, view.kind, triggerNoteCapture]);
 
   return (
     <div className="flex h-screen bg-(--color-bg) text-(--color-text-primary)">
@@ -230,6 +280,7 @@ function AppShell({
         open={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
       />
+      <NoteCaptureModal context={captureCtx} onClose={closeNoteCapture} />
       <main
         id="main"
         tabIndex={-1}
@@ -249,7 +300,11 @@ function AppShell({
             progressTick={progressTick}
           />
         ) : view.kind === "group" ? (
-          <DetailView groupId={view.id} progressTick={progressTick} />
+          <DetailView
+            groupId={view.id}
+            progressTick={progressTick}
+            notesTick={notesTick}
+          />
         ) : (
           <Settings onLibrariesChanged={refreshLibraries} />
         )}

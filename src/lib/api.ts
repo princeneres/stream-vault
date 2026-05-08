@@ -9,6 +9,8 @@ import type {
   Library,
   LibraryContents,
   LibraryKind,
+  Note,
+  NoteSavedEvent,
   ProgressUpdate,
   ScanResult,
   SearchResults,
@@ -58,6 +60,10 @@ export function playItem(itemId: number): Promise<void> {
   return invoke<void>("play_item", { itemId });
 }
 
+export function playItemAt(itemId: number, startSeconds: number): Promise<void> {
+  return invoke<void>("play_item_at", { itemId, startSeconds });
+}
+
 export function setItemCompleted(
   itemId: number,
   completed: boolean,
@@ -95,4 +101,56 @@ export async function onItemProgress(
   handler: (update: ProgressUpdate) => void,
 ): Promise<UnlistenFn> {
   return listen<ProgressUpdate>("item-progress", (event) => handler(event.payload));
+}
+
+// ---- Notes ----------------------------------------------------------------
+
+export function addNote(
+  itemId: number,
+  timestampSec: number,
+  content: string,
+): Promise<Note> {
+  return invoke<Note>("add_note", { itemId, timestampSec, content });
+}
+
+export function updateNote(noteId: number, content: string): Promise<Note> {
+  return invoke<Note>("update_note", { noteId, content });
+}
+
+export function deleteNote(noteId: number): Promise<void> {
+  return invoke<void>("delete_note", { noteId });
+}
+
+export function listNotesForItem(itemId: number): Promise<Note[]> {
+  return invoke<Note[]>("list_notes_for_item", { itemId });
+}
+
+export function countNotesForItems(
+  itemIds: number[],
+): Promise<Record<number, number>> {
+  return invoke<Record<number, number>>("count_notes_for_items", { itemIds });
+}
+
+export async function onNoteSaved(
+  handler: (event: NoteSavedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<NoteSavedEvent>("note-saved", (event) => handler(event.payload));
+}
+
+// ---- mpv IPC --------------------------------------------------------------
+
+export function mpvGetPosition(): Promise<number | null> {
+  return invoke<number | null>("mpv_get_position");
+}
+
+export function mpvSetPaused(paused: boolean): Promise<void> {
+  return invoke<void>("mpv_set_paused", { paused });
+}
+
+export function mpvSeek(seconds: number): Promise<void> {
+  return invoke<void>("mpv_seek", { seconds });
+}
+
+export function mpvCurrentItemId(): Promise<number | null> {
+  return invoke<number | null>("mpv_current_item_id");
 }

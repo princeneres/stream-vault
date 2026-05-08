@@ -87,6 +87,17 @@ pub struct Item {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub id: i64,
+    pub item_id: i64,
+    pub timestamp_sec: f64,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub item_id: i64,
     pub position_seconds: f64,

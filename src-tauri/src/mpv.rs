@@ -329,6 +329,134 @@ pub(crate) fn parse_property_response(line: &str) -> Option<(u64, f64)> {
     Some((id, data))
 }
 
+// ---- Ad-hoc IPC commands (note capture, click-to-seek) -------------------
+//
+// The polling loop in `progress_loop` owns a long-lived connection to the mpv
+// socket. mpv's JSON IPC is per-connection (request_id routing is per-fd), so
+// ad-hoc commands open a second short-lived connection rather than sharing
+// the loop's read/write halves. Avoids the actor refactor and stays
+// backward-compatible with the existing flow.
+
+/// Snapshot of the active session's socket path, if any.
+pub async fn current_socket_path(state: &PlaybackState) -> Option<PathBuf> {
+    let guard = state.inner.lock().await;
+    guard.as_ref().map(|s| s.socket_path.clone())
+}
+
+/// Active session's item id, if any.
+pub async fn current_item_id(state: &PlaybackState) -> Option<i64> {
+    let guard = state.inner.lock().await;
+    guard.as_ref().map(|s| s.item_id)
+}
+
+/// Live `time-pos` from mpv. `Ok(None)` when no session is active.
+#[cfg(target_os = "linux")]
+pub async fn ipc_get_position(state: &PlaybackState) -> Result<Option<f64>> {
+    let Some(socket) = current_socket_path(state).await else {
+        return Ok(None);
+    };
+    let req = serde_json::json!({"command": ["get_property", "time-pos"], "request_id": 9001});
+    let resp = ipc_request(&socket, req, 9001).await?;
+    Ok(resp)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn ipc_get_position(_state: &PlaybackState) -> Result<Option<f64>> {
+    Ok(None)
+}
+
+/// Pause/resume the active session. No-op if no session.
+#[cfg(target_os = "linux")]
+pub async fn ipc_set_paused(state: &PlaybackState, paused: bool) -> Result<()> {
+    let Some(socket) = current_socket_path(state).await else {
+        return Ok(());
+    };
+    let req = serde_json::json!({
+        "command": ["set_property", "pause", paused],
+        "request_id": 9002,
+    });
+    ipc_fire(&socket, req).await
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn ipc_set_paused(_state: &PlaybackState, _paused: bool) -> Result<()> {
+    Ok(())
+}
+
+/// Absolute seek (seconds). No-op if no session.
+#[cfg(target_os = "linux")]
+pub async fn ipc_seek(state: &PlaybackState, seconds: f64) -> Result<()> {
+    let Some(socket) = current_socket_path(state).await else {
+        return Ok(());
+    };
+    let req = serde_json::json!({
+        "command": ["seek", seconds, "absolute"],
+        "request_id": 9003,
+    });
+    ipc_fire(&socket, req).await
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn ipc_seek(_state: &PlaybackState, _seconds: f64) -> Result<()> {
+    Ok(())
+}
+
+/// Issue a `get_property`-style request, returning the matching numeric
+/// `data`. Drains lines for up to 800ms.
+#[cfg(target_os = "linux")]
+async fn ipc_request(
+    socket: &std::path::Path,
+    body: Value,
+    expected_id: u64,
+) -> Result<Option<f64>> {
+    let stream = UnixStream::connect(socket)
+        .await
+        .map_err(|e| anyhow!("connect mpv socket: {e}"))?;
+    let (read, mut write) = stream.into_split();
+    let mut reader = BufReader::new(read);
+    let line = format!("{}\n", body);
+    write
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| anyhow!("write mpv ipc: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(800);
+    loop {
+        let mut buf = String::new();
+        tokio::select! {
+            res = reader.read_line(&mut buf) => {
+                match res {
+                    Ok(0) => return Ok(None),
+                    Ok(_) => {
+                        if let Some((id, val)) = parse_property_response(&buf) {
+                            if id == expected_id {
+                                return Ok(Some(val));
+                            }
+                        }
+                    }
+                    Err(e) => return Err(anyhow!("read mpv ipc: {e}")),
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => return Ok(None),
+        }
+    }
+}
+
+/// Fire-and-forget command; ignores any reply.
+#[cfg(target_os = "linux")]
+async fn ipc_fire(socket: &std::path::Path, body: Value) -> Result<()> {
+    let stream = UnixStream::connect(socket)
+        .await
+        .map_err(|e| anyhow!("connect mpv socket: {e}"))?;
+    let (_read, mut write) = stream.into_split();
+    let line = format!("{}\n", body);
+    write
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| anyhow!("write mpv ipc: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

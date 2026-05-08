@@ -54,6 +54,21 @@ export interface Progress {
   watchedAt: string;
 }
 
+export interface Note {
+  id: number;
+  itemId: number;
+  timestampSec: number;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NoteSavedEvent {
+  kind: "added" | "updated" | "deleted";
+  itemId: number;
+  noteId: number | null;
+}
+
 /** `Item` flattened with an optional `Progress`. */
 export type ItemWithProgress = Item & {
   progress: Progress | null;

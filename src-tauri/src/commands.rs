@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::db::Database;
 use crate::models::{
     Group, GroupDetail, Item, ItemWithProgress, Library, LibraryContents,
-    LibraryKind, ProgressUpdate, ScanResult, SearchResults,
+    LibraryKind, Note, ProgressUpdate, ScanResult, SearchResults,
 };
 use crate::{scanner, thumbnails};
 
@@ -322,15 +322,42 @@ pub fn play_item(
     app: AppHandle,
     item_id: i64,
 ) -> CmdResult<()> {
+    spawn_play(&db, &state, &app, item_id, None)
+}
+
+/// Play `item_id` starting at an explicit offset (seconds). Used by
+/// click-to-seek from notes when the target item is not the currently active
+/// session — bypasses the saved-progress resume.
+#[tauri::command]
+pub fn play_item_at(
+    db: State<'_, Database>,
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+    app: AppHandle,
+    item_id: i64,
+    start_seconds: f64,
+) -> CmdResult<()> {
+    spawn_play(&db, &state, &app, item_id, Some(start_seconds.max(0.0)))
+}
+
+fn spawn_play(
+    db: &State<'_, Database>,
+    state: &State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+    app: &AppHandle,
+    item_id: i64,
+    start_override: Option<f64>,
+) -> CmdResult<()> {
     let item = db
         .get_item_by_id(item_id)
         .map_err(cmd_err)?
         .ok_or_else(|| format!("item {item_id} not found"))?;
-    let resume_seconds = db
-        .get_progress_by_item(item_id)
-        .map_err(cmd_err)?
-        .map(|p| p.position_seconds)
-        .unwrap_or(0.0);
+    let resume_seconds = match start_override {
+        Some(s) => s,
+        None => db
+            .get_progress_by_item(item_id)
+            .map_err(cmd_err)?
+            .map(|p| p.position_seconds)
+            .unwrap_or(0.0),
+    };
 
     let db_handle = db.inner().clone();
     let state_handle = state.inner().clone();
@@ -471,6 +498,131 @@ pub fn regenerate_library_artwork(
         }
     });
     Ok(())
+}
+
+// ---- Notes (Backend Engineer) ---------------------------------------------
+
+/// Insert a timestamped note for an item. Emits `note-saved` so views refresh.
+#[tauri::command]
+pub fn add_note(
+    db: State<'_, Database>,
+    app: AppHandle,
+    item_id: i64,
+    timestamp_sec: f64,
+    content: String,
+) -> CmdResult<Note> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err("note content cannot be empty".into());
+    }
+    let note = db.insert_note(item_id, timestamp_sec.max(0.0), trimmed).map_err(cmd_err)?;
+    emit_note_saved(&app, "added", item_id, Some(note.id));
+    Ok(note)
+}
+
+/// Replace an existing note's content. Timestamp is immutable.
+#[tauri::command]
+pub fn update_note(
+    db: State<'_, Database>,
+    app: AppHandle,
+    note_id: i64,
+    content: String,
+) -> CmdResult<Note> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err("note content cannot be empty".into());
+    }
+    let note = db.update_note(note_id, trimmed).map_err(cmd_err)?;
+    emit_note_saved(&app, "updated", note.item_id, Some(note.id));
+    Ok(note)
+}
+
+#[tauri::command]
+pub fn delete_note(
+    db: State<'_, Database>,
+    app: AppHandle,
+    note_id: i64,
+) -> CmdResult<()> {
+    let item_id_before = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT item_id FROM notes WHERE id = ?",
+                [note_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .ok())
+        })
+        .map_err(cmd_err)?
+        .unwrap_or(-1);
+    db.delete_note(note_id).map_err(cmd_err)?;
+    emit_note_saved(&app, "deleted", item_id_before, Some(note_id));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_notes_for_item(
+    db: State<'_, Database>,
+    item_id: i64,
+) -> CmdResult<Vec<Note>> {
+    db.list_notes_for_item(item_id).map_err(cmd_err)
+}
+
+#[tauri::command]
+pub fn count_notes_for_items(
+    db: State<'_, Database>,
+    item_ids: Vec<i64>,
+) -> CmdResult<std::collections::HashMap<i64, i64>> {
+    db.count_notes_for_items(&item_ids).map_err(cmd_err)
+}
+
+fn emit_note_saved(app: &AppHandle, kind: &str, item_id: i64, note_id: Option<i64>) {
+    let _ = app.emit(
+        "note-saved",
+        serde_json::json!({ "kind": kind, "itemId": item_id, "noteId": note_id }),
+    );
+}
+
+// ---- mpv IPC (Player Engineer) --------------------------------------------
+
+/// Live `time-pos` from the active mpv session, or `None` if no session.
+#[tauri::command]
+pub async fn mpv_get_position(
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+) -> CmdResult<Option<f64>> {
+    crate::mpv::ipc_get_position(state.inner())
+        .await
+        .map_err(cmd_err)
+}
+
+/// Pause/resume the active session. No-op when nothing is playing.
+#[tauri::command]
+pub async fn mpv_set_paused(
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+    paused: bool,
+) -> CmdResult<()> {
+    crate::mpv::ipc_set_paused(state.inner(), paused)
+        .await
+        .map_err(cmd_err)
+}
+
+/// Absolute seek (seconds). No-op when nothing is playing.
+#[tauri::command]
+pub async fn mpv_seek(
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+    seconds: f64,
+) -> CmdResult<()> {
+    crate::mpv::ipc_seek(state.inner(), seconds)
+        .await
+        .map_err(cmd_err)
+}
+
+/// `Some(item_id)` when a session is active, else `None`. Lets the frontend
+/// decide between in-place seek vs. starting playback at a timestamp.
+#[tauri::command]
+pub async fn mpv_current_item_id(
+    state: State<'_, std::sync::Arc<crate::mpv::PlaybackState>>,
+) -> CmdResult<Option<i64>> {
+    Ok(crate::mpv::current_item_id(state.inner()).await)
 }
 
 // ---- Settings (Backend Engineer) ------------------------------------------

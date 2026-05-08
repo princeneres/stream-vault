@@ -27,6 +27,10 @@ const SHORTCUTS: { section: string; rows: Row[] }[] = [
       { keys: ["g", "s"], label: "Go to settings" },
     ],
   },
+  {
+    section: "Playback",
+    rows: [{ keys: ["Alt", "N"], label: "Capture note at current timestamp" }],
+  },
 ];
 
 export default function ShortcutsDialog({

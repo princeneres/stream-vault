@@ -27,8 +27,10 @@ import Input from "@/components/Input";
 import ItemCard from "@/components/ItemCard";
 import ViewControls from "@/components/ViewControls";
 import { cn } from "@/components/cn";
+import NotesPanel from "@/components/NotesPanel";
 import {
   convertFileSrc,
+  countNotesForItems,
   getGroup,
   getNextItem,
   playItem,
@@ -48,6 +50,8 @@ export interface DetailViewProps {
   groupId: number;
   /** Bumped by the App when item-progress fires; refetches detail. */
   progressTick: number;
+  /** Bumped by the App when note-saved fires; refetches notes. */
+  notesTick: number;
 }
 
 type TreeCache = Map<number, GroupDetail>;
@@ -76,10 +80,12 @@ function ItemGrid({
   items,
   onToggle,
   prefs,
+  noteCounts,
 }: {
   items: ItemWithProgress[];
   onToggle: (item: ItemWithProgress, next: boolean) => void;
   prefs: ViewPrefs;
+  noteCounts: Record<number, number>;
 }) {
   const sorted = useMemo(() => applyItemPrefs(items, prefs), [items, prefs]);
   return (
@@ -95,6 +101,7 @@ function ItemGrid({
             thumbnail={thumbSrc(item.thumbnailPath)}
             progressPercent={progressPercent(item)}
             completed={completed}
+            noteCount={noteCounts[item.id]}
             onToggleCompleted={(next) => onToggle(item, next)}
             onClick={() => playItem(item.id)}
           />
@@ -115,6 +122,7 @@ const SubgroupSection = memo(function SubgroupSection({
   onItemToggle,
   onGroupToggle,
   prefs,
+  noteCounts,
 }: {
   group: Group;
   depth?: number;
@@ -126,6 +134,7 @@ const SubgroupSection = memo(function SubgroupSection({
   onItemToggle: (item: ItemWithProgress, next: boolean) => void;
   onGroupToggle: (group: Group, next: boolean) => void;
   prefs: ViewPrefs;
+  noteCounts: Record<number, number>;
 }) {
   const open = expanded.has(group.id);
   const detail = cache.get(group.id) ?? null;
@@ -197,6 +206,7 @@ const SubgroupSection = memo(function SubgroupSection({
                 items={detail.items}
                 onToggle={onItemToggle}
                 prefs={prefs}
+                noteCounts={noteCounts}
               />
             ) : null}
             {detail.subgroups.map((sg) => (
@@ -212,6 +222,7 @@ const SubgroupSection = memo(function SubgroupSection({
                 onItemToggle={onItemToggle}
                 onGroupToggle={onGroupToggle}
                 prefs={prefs}
+                noteCounts={noteCounts}
               />
             ))}
             {isEmpty ? (
@@ -291,7 +302,11 @@ function collectAllGroupIds(rootId: number, cache: TreeCache): number[] {
   return out;
 }
 
-export default function DetailView({ groupId, progressTick }: DetailViewProps) {
+export default function DetailView({
+  groupId,
+  progressTick,
+  notesTick,
+}: DetailViewProps) {
   const [detail, setDetail] = useState<GroupDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -300,6 +315,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [cache, setCache] = useState<TreeCache>(new Map());
   const [query, setQuery] = useState("");
+  const [noteCounts, setNoteCounts] = useState<Record<number, number>>({});
   const cacheRef = useRef<TreeCache>(cache);
   const seededRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -313,8 +329,31 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
     setExpanded(new Set());
     setCache(new Map());
     setQuery("");
+    setNoteCounts({});
     seededRef.current = false;
   }, [groupId]);
+
+  // Refetch note counts for every cached item whenever the cache or notesTick
+  // changes. Cheap query (single GROUP BY) so it's fine to recompute.
+  useEffect(() => {
+    const ids = new Set<number>();
+    for (const detail of cache.values()) {
+      for (const item of detail.items) ids.add(item.id);
+    }
+    if (ids.size === 0) {
+      setNoteCounts({});
+      return;
+    }
+    let cancelled = false;
+    countNotesForItems(Array.from(ids))
+      .then((c) => {
+        if (!cancelled) setNoteCounts(c);
+      })
+      .catch((e) => console.error("countNotesForItems failed", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [cache, notesTick]);
 
   useEffect(() => {
     let cancelled = false;
@@ -729,6 +768,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
                 items={items}
                 onToggle={handleItemToggle}
                 prefs={prefs}
+                noteCounts={noteCounts}
               />
             ) : null}
 
@@ -744,6 +784,7 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
                 onItemToggle={handleItemToggle}
                 onGroupToggle={handleGroupToggle}
                 prefs={prefs}
+                noteCounts={noteCounts}
               />
             ))}
 
@@ -754,10 +795,67 @@ export default function DetailView({ groupId, progressTick }: DetailViewProps) {
                 description="No subgroups or items found in this group."
               />
             ) : null}
+
+            <GroupNotesSection
+              cache={cache}
+              noteCounts={noteCounts}
+              notesTick={notesTick}
+            />
           </>
         )}
       </div>
     </div>
+  );
+}
+
+function GroupNotesSection({
+  cache,
+  noteCounts,
+  notesTick,
+}: {
+  cache: TreeCache;
+  noteCounts: Record<number, number>;
+  notesTick: number;
+}) {
+  const itemsWithNotes = useMemo(() => {
+    const seen = new Set<number>();
+    const out: ItemWithProgress[] = [];
+    for (const detail of cache.values()) {
+      for (const item of detail.items) {
+        if (seen.has(item.id)) continue;
+        if ((noteCounts[item.id] ?? 0) > 0) {
+          seen.add(item.id);
+          out.push(item);
+        }
+      }
+    }
+    return out;
+  }, [cache, noteCounts]);
+
+  if (itemsWithNotes.length === 0) return null;
+
+  return (
+    <section className="space-y-4 pt-2">
+      <h2 className="text-base font-semibold text-(--color-text-primary)">
+        Notes
+      </h2>
+      <div className="space-y-5">
+        {itemsWithNotes.map((item) => {
+          const count = noteCounts[item.id] ?? 0;
+          return (
+            <div key={item.id} className="space-y-2">
+              <h3 className="text-sm font-medium text-(--color-text-primary)">
+                {item.title}
+                <span className="ml-2 text-xs font-normal text-(--color-text-muted)">
+                  ({count} note{count === 1 ? "" : "s"})
+                </span>
+              </h3>
+              <NotesPanel itemId={item.id} refreshTick={notesTick} />
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
