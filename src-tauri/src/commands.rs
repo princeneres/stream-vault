@@ -7,14 +7,16 @@
 // Owner: Orchestrator. Specialists must NOT change a signature without
 // flagging — the TS wrappers in `src/lib/api.ts` rely on these shapes.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::Database;
 use crate::models::{
-    Group, GroupDetail, Item, ItemWithProgress, Library, LibraryContents,
-    LibraryKind, Note, ProgressUpdate, ScanResult, SearchResults,
+    Attachment, AttachmentKind, Group, GroupDetail, Item, ItemWithProgress, Library,
+    LibraryContents, LibraryKind, Note, ProgressUpdate, ScanResult, SearchResults,
 };
 use crate::{scanner, thumbnails};
 
@@ -266,7 +268,11 @@ pub fn get_library_contents(
 /// Group + immediate sub-groups + items (with progress) for a course/series
 /// detail view.
 #[tauri::command]
-pub fn get_group(db: State<'_, Database>, group_id: i64) -> CmdResult<GroupDetail> {
+pub fn get_group(
+    db: State<'_, Database>,
+    app: AppHandle,
+    group_id: i64,
+) -> CmdResult<GroupDetail> {
     let group = db
         .get_group_by_id(group_id)
         .map_err(cmd_err)?
@@ -282,11 +288,182 @@ pub fn get_group(db: State<'_, Database>, group_id: i64) -> CmdResult<GroupDetai
             item,
         })
         .collect();
+    let pdf_cache_dir = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("pdf-previews"));
+    let attachments = list_attachments(&group.folder_path, pdf_cache_dir.as_deref());
     Ok(GroupDetail {
         group,
         subgroups,
         items,
+        attachments,
     })
+}
+
+/// Direct-child non-video files inside a group's folder. Hidden files,
+/// directories, and known video extensions are skipped (videos are surfaced
+/// as `Item`s instead). Errors reading the folder degrade to an empty list
+/// rather than failing the whole `get_group` call.
+fn list_attachments(folder: &str, pdf_cache_dir: Option<&Path>) -> Vec<Attachment> {
+    let dir = Path::new(folder);
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            log::debug!("list_attachments: read_dir({folder}) failed: {e}");
+            return Vec::new();
+        }
+    };
+    let mut out: Vec<Attachment> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let ft = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if !ft.is_file() {
+            continue;
+        }
+        if scanner::is_video_file(&path) {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        let kind = ext
+            .as_deref()
+            .map(classify_attachment)
+            .unwrap_or(AttachmentKind::Other);
+        let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let path_str = path.to_string_lossy().to_string();
+        let preview_path = match kind {
+            AttachmentKind::Image => Some(path_str.clone()),
+            AttachmentKind::Pdf => pdf_cache_dir
+                .and_then(|dir| cached_pdf_preview(&path, dir))
+                .map(|p| p.to_string_lossy().to_string()),
+            _ => None,
+        };
+        out.push(Attachment {
+            path: path_str,
+            name: name.to_string(),
+            kind,
+            size_bytes,
+            extension: ext,
+            preview_path,
+        });
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+fn classify_attachment(ext: &str) -> AttachmentKind {
+    match ext {
+        "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "svg" | "avif" | "heic"
+        | "tiff" | "tif" => AttachmentKind::Image,
+        "pdf" => AttachmentKind::Pdf,
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "tgz" | "tbz2" | "txz" => {
+            AttachmentKind::Archive
+        }
+        "mp3" | "flac" | "wav" | "ogg" | "m4a" | "opus" | "aac" | "wma" => {
+            AttachmentKind::Audio
+        }
+        "doc" | "docx" | "ppt" | "pptx" | "xls" | "xlsx" | "odt" | "ods" | "odp"
+        | "epub" => AttachmentKind::Document,
+        "txt" | "md" | "rtf" | "csv" | "log" | "json" | "yml" | "yaml" | "xml" => {
+            AttachmentKind::Text
+        }
+        _ => AttachmentKind::Other,
+    }
+}
+
+/// Cached PDF preview lookup — never spawns pdftoppm. Returns `Some` only if
+/// a fresh cache file exists (mtime ≥ source PDF). Used by `list_attachments`
+/// so `get_group` stays fast; `generate_pdf_preview` does the actual render.
+fn cached_pdf_preview(pdf_path: &Path, cache_dir: &Path) -> Option<PathBuf> {
+    let stem = format!("{:016x}", fnv1a64(&pdf_path.to_string_lossy()));
+    let cache_file = cache_dir.join(&stem).with_extension("png");
+    if !cache_file.is_file() {
+        return None;
+    }
+    let (c_meta, p_meta) = (cache_file.metadata().ok()?, pdf_path.metadata().ok()?);
+    let (c_mtime, p_mtime) = (c_meta.modified().ok()?, p_meta.modified().ok()?);
+    if c_mtime >= p_mtime {
+        Some(cache_file)
+    } else {
+        None
+    }
+}
+
+/// Render the first page of `pdf_path` as a PNG into `cache_dir` (cache key
+/// = stable hash of the absolute path). Returns `None` if `pdftoppm` is
+/// missing, the conversion fails, or the cache dir can't be created. Cache
+/// is invalidated when the PDF's mtime is newer than the cached file.
+fn ensure_pdf_preview(pdf_path: &Path, cache_dir: &Path) -> Option<PathBuf> {
+    if let Some(p) = cached_pdf_preview(pdf_path, cache_dir) {
+        return Some(p);
+    }
+    let stem = format!("{:016x}", fnv1a64(&pdf_path.to_string_lossy()));
+    let cache_stem = cache_dir.join(&stem);
+    let cache_file = cache_stem.with_extension("png");
+
+    if let Err(e) = std::fs::create_dir_all(cache_dir) {
+        log::warn!("create pdf cache dir {cache_dir:?}: {e}");
+        return None;
+    }
+
+    let output = Command::new("pdftoppm")
+        .args(["-png", "-f", "1", "-l", "1", "-singlefile", "-r", "96"])
+        .arg(pdf_path)
+        .arg(&cache_stem)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            if cache_file.is_file() {
+                Some(cache_file)
+            } else {
+                log::warn!(
+                    "pdftoppm reported success but no output at {cache_file:?}"
+                );
+                None
+            }
+        }
+        Ok(o) => {
+            log::warn!(
+                "pdftoppm failed for {}: {}",
+                pdf_path.display(),
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            None
+        }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                log::debug!(
+                    "pdftoppm not installed; skipping PDF preview (install poppler-utils)"
+                );
+            } else {
+                log::warn!("pdftoppm spawn failed: {e}");
+            }
+            None
+        }
+    }
+}
+
+/// Stable 64-bit FNV-1a so cache filenames stay consistent across runs.
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// Most recently watched in-progress items, newest first.
@@ -594,6 +771,28 @@ fn publish_note_op(db: &Database, app: &AppHandle, op: crate::vault::VaultOp) {
             serde_json::json!({ "error": e.to_string() }),
         );
     }
+}
+
+/// Render (or hit cache for) the first page of a PDF as a PNG. Frontend
+/// calls this lazily after `get_group` so the initial response stays fast
+/// and previews stream in as they finish.
+#[tauri::command]
+pub async fn generate_pdf_preview(
+    app: AppHandle,
+    path: String,
+) -> CmdResult<Option<String>> {
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(cmd_err)?
+        .join("pdf-previews");
+    let pdf_path = std::path::PathBuf::from(&path);
+    let preview = tauri::async_runtime::spawn_blocking(move || {
+        ensure_pdf_preview(&pdf_path, &cache_dir)
+    })
+    .await
+    .map_err(cmd_err)?;
+    Ok(preview.map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command]

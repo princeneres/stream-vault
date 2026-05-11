@@ -97,10 +97,30 @@ export interface LibraryContents {
   topItems: ItemWithProgress[];
 }
 
+export type AttachmentKind =
+  | "image"
+  | "pdf"
+  | "archive"
+  | "audio"
+  | "document"
+  | "text"
+  | "other";
+
+export interface Attachment {
+  path: string;
+  name: string;
+  kind: AttachmentKind;
+  sizeBytes: number;
+  extension: string | null;
+  /** Renderable preview image path (own path for image, generated PNG for PDF, null otherwise). */
+  previewPath: string | null;
+}
+
 export interface GroupDetail {
   group: Group;
   subgroups: Group[];
   items: ItemWithProgress[];
+  attachments: Attachment[];
 }
 
 export interface SearchResults {

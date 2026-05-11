@@ -7,11 +7,18 @@ import {
   useState,
 } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  Archive,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  File as FileIcon,
+  FileAudio,
+  FileText,
+  FileType,
+  ImageIcon,
   ImagePlus,
   Layers,
   Locate,
@@ -39,7 +46,13 @@ import {
   setGroupPoster,
   setItemCompleted,
 } from "@/lib/api";
-import type { Group, GroupDetail, ItemWithProgress } from "@/lib/types";
+import type {
+  Attachment,
+  AttachmentKind,
+  Group,
+  GroupDetail,
+  ItemWithProgress,
+} from "@/lib/types";
 import {
   applyItemPrefs,
   DEFAULT_PREFS,
@@ -74,6 +87,103 @@ function episodeLabel(item: ItemWithProgress): string | undefined {
     return `S${s}E${e}`;
   }
   return undefined;
+}
+
+function attachmentIcon(kind: AttachmentKind, size = 18) {
+  const props = { size, "aria-hidden": true } as const;
+  switch (kind) {
+    case "image":
+      return <ImageIcon {...props} />;
+    case "pdf":
+      return <FileType {...props} />;
+    case "archive":
+      return <Archive {...props} />;
+    case "audio":
+      return <FileAudio {...props} />;
+    case "document":
+    case "text":
+      return <FileText {...props} />;
+    default:
+      return <FileIcon {...props} />;
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+async function handleAttachmentClick(att: Attachment) {
+  try {
+    if (att.kind === "archive") {
+      await revealItemInDir(att.path);
+    } else {
+      await openPath(att.path);
+    }
+  } catch (e) {
+    console.error("attachment open failed", e);
+  }
+}
+
+function AttachmentList({ attachments }: { attachments: Attachment[] }) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className="-mx-1 flex flex-wrap gap-3 px-1">
+      {attachments.map((att) => {
+        const reveal = att.kind === "archive";
+        const action = reveal
+          ? "Show in file manager"
+          : "Open with system default";
+        const label = `${att.name} · ${action}`;
+        const previewSrc = att.previewPath
+          ? convertFileSrc(att.previewPath)
+          : null;
+        return (
+          <button
+            key={att.path}
+            type="button"
+            onClick={() => handleAttachmentClick(att)}
+            title={label}
+            aria-label={label}
+            className="group/att flex w-44 flex-col overflow-hidden rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) text-left transition-colors hover:border-(--color-accent) hover:bg-(--color-surface-raised) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+          >
+            <div className="flex h-28 w-full items-center justify-center bg-(--color-surface-raised) text-(--color-text-secondary)">
+              {previewSrc ? (
+                <img
+                  src={previewSrc}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className={
+                    att.kind === "pdf"
+                      ? "h-full w-full object-contain"
+                      : "h-full w-full object-cover"
+                  }
+                />
+              ) : (
+                attachmentIcon(att.kind, 28)
+              )}
+            </div>
+            <div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
+              <span className="shrink-0 text-(--color-text-muted)">
+                {attachmentIcon(att.kind, 14)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-(--color-text-primary)">
+                  {att.name}
+                </p>
+                <p className="text-[10px] uppercase tracking-wide text-(--color-text-muted)">
+                  {att.extension ?? att.kind} · {formatBytes(att.sizeBytes)}
+                </p>
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function ItemGrid({
@@ -167,7 +277,8 @@ const SubgroupSection = memo(function SubgroupSection({
   const isEmpty =
     detail !== null &&
     detail.items.length === 0 &&
-    detail.subgroups.length === 0;
+    detail.subgroups.length === 0 &&
+    detail.attachments.length === 0;
   const allWatched =
     group.itemCount > 0 && group.completedCount >= group.itemCount;
   const indent = depth * 24;
@@ -208,6 +319,9 @@ const SubgroupSection = memo(function SubgroupSection({
                 prefs={prefs}
                 noteCounts={noteCounts}
               />
+            ) : null}
+            {detail.attachments.length > 0 ? (
+              <AttachmentList attachments={detail.attachments} />
             ) : null}
             {detail.subgroups.map((sg) => (
               <SubgroupSection
@@ -605,10 +719,11 @@ export default function DetailView({
     );
   }
 
-  const { group, subgroups, items } = detail;
+  const { group, subgroups, items, attachments } = detail;
   const poster = thumbSrc(group.posterPath);
   const combinedTick = progressTick + refreshTick;
-  const hasContents = items.length > 0 || subgroups.length > 0;
+  const hasContents =
+    items.length > 0 || subgroups.length > 0 || attachments.length > 0;
   const expandAllBusy = busyAction === "expand-all";
   const revealBusy = busyAction === "reveal-next";
 
@@ -770,6 +885,10 @@ export default function DetailView({
                 prefs={prefs}
                 noteCounts={noteCounts}
               />
+            ) : null}
+
+            {attachments.length > 0 ? (
+              <AttachmentList attachments={attachments} />
             ) : null}
 
             {subgroups.map((sg) => (

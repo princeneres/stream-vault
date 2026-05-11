@@ -142,12 +142,38 @@ pub struct LibraryContents {
     pub top_items: Vec<ItemWithProgress>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentKind {
+    Image,
+    Pdf,
+    Archive,
+    Audio,
+    Document,
+    Text,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub path: String,
+    pub name: String,
+    pub kind: AttachmentKind,
+    pub size_bytes: u64,
+    pub extension: Option<String>,
+    /// Local path to a renderable preview image (own path for `Image`,
+    /// generated first-page PNG for `Pdf`, `None` otherwise).
+    pub preview_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupDetail {
     pub group: Group,
     pub subgroups: Vec<Group>,
     pub items: Vec<ItemWithProgress>,
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
