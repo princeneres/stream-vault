@@ -26,6 +26,7 @@ import {
   scanLibrary,
   setSetting,
 } from "@/lib/api";
+import { applyTheme, getStoredTheme, THEMES, type Theme } from "@/lib/theme";
 import type { Library, LibraryKind, ScanResult } from "@/lib/types";
 
 const KIND_OPTIONS: { value: LibraryKind; label: string }[] = [
@@ -42,6 +43,7 @@ export interface SettingsProps {
 
 export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<Library[]>([]);
+  const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [vaultPath, setVaultPath] = useState("");
   const [vaultSubfolder, setVaultSubfolder] = useState("");
@@ -263,6 +265,32 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-base font-semibold text-(--color-text-primary)">
+          Appearance
+        </h2>
+        <div className="flex items-center justify-between gap-4 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium text-(--color-text-primary)">
+              Theme
+            </p>
+            <p className="text-xs text-(--color-text-secondary)">
+              Switches the entire UI palette. Saved locally on this device.
+            </p>
+          </div>
+          <Select
+            aria-label="Theme"
+            value={theme}
+            options={THEMES}
+            onChange={(e) => {
+              const next = e.currentTarget.value as Theme;
+              setTheme(next);
+              applyTheme(next);
+            }}
+          />
+        </div>
       </section>
 
       <section className="space-y-4">
