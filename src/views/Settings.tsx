@@ -44,6 +44,8 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [vaultPath, setVaultPath] = useState("");
+  const [vaultSubfolder, setVaultSubfolder] = useState("");
+  const [savedSubfolder, setSavedSubfolder] = useState("");
   const [republishing, setRepublishing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
@@ -73,6 +75,15 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       try {
         const v = await getSetting("obsidian_vault_path");
         setVaultPath(v ?? "");
+      } catch (e) {
+        console.error("getSetting failed", e);
+      }
+    })();
+    (async () => {
+      try {
+        const v = await getSetting("obsidian_vault_subfolder");
+        setVaultSubfolder(v ?? "");
+        setSavedSubfolder(v ?? "");
       } catch (e) {
         console.error("getSetting failed", e);
       }
@@ -142,6 +153,21 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       pushToast("Obsidian vault disabled", "info");
     } catch (e) {
       pushToast(`Failed to clear: ${String(e)}`, "error");
+    }
+  };
+
+  const handleSaveSubfolder = async () => {
+    const trimmed = vaultSubfolder.trim();
+    if (trimmed === savedSubfolder.trim()) return;
+    try {
+      await setSetting("obsidian_vault_subfolder", trimmed);
+      setSavedSubfolder(trimmed);
+      pushToast(
+        "Subfolder saved. Republish to relocate notes.",
+        "info",
+      );
+    } catch (e) {
+      pushToast(`Failed to save subfolder: ${String(e)}`, "error");
     }
   };
 
@@ -299,7 +325,7 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
               <p className="text-xs text-(--color-text-secondary)">
                 Each note is mirrored as Markdown under{" "}
                 <code className="rounded bg-(--color-surface-raised) px-1 py-0.5 text-[11px]">
-                  StreamVault/
+                  {(savedSubfolder.trim() || "StreamVault") + "/"}
                 </code>{" "}
                 inside the chosen vault. Leave empty to keep notes local-only.
               </p>
@@ -314,6 +340,31 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
               )}
             </div>
           </div>
+          {vaultPath ? (
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-(--color-text-secondary)">
+                Subfolder name
+              </span>
+              <Input
+                value={vaultSubfolder}
+                onChange={(e) => setVaultSubfolder(e.currentTarget.value)}
+                onBlur={handleSaveSubfolder}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder="StreamVault"
+              />
+              <span className="text-[11px] text-(--color-text-muted)">
+                Unsafe characters (/ \ : * ? &quot; &lt; &gt; |) are stripped.
+                Empty falls back to <code>StreamVault</code>. After changing,
+                use <em>Republish all notes</em> to write to the new folder
+                (the old folder is left in place).
+              </span>
+            </label>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"

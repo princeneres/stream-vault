@@ -21,7 +21,8 @@ use crate::db::Database;
 use crate::models::{Group, Item, Library, Note};
 
 const VAULT_SETTING_KEY: &str = "obsidian_vault_path";
-const SUBFOLDER: &str = "StreamVault";
+const SUBFOLDER_SETTING_KEY: &str = "obsidian_vault_subfolder";
+const DEFAULT_SUBFOLDER: &str = "StreamVault";
 const ROLLUP_FILE: &str = "_index.md";
 const SECTION_HEADER: &str = "## Notes from StreamVault";
 const END_SENTINEL: &str = "<!-- sv:end -->";
@@ -37,8 +38,8 @@ pub enum VaultOp {
 /// Best-effort publish. Returns `Ok(())` when no vault is configured so the
 /// caller can keep its own DB write succeeding regardless.
 pub fn publish(db: &Database, op: VaultOp) -> Result<()> {
-    let vault_root = match resolve_vault_root(db)? {
-        Some(p) => p,
+    let target = match resolve_vault_target(db)? {
+        Some(t) => t,
         None => return Ok(()),
     };
 
@@ -48,16 +49,16 @@ pub fn publish(db: &Database, op: VaultOp) -> Result<()> {
     };
     let ctx = build_item_context(db, item_id)?;
 
-    publish_item_md(&vault_root, &ctx, &op)?;
-    publish_rollup_md(&vault_root, db, &ctx)?;
+    publish_item_md(&target, &ctx, &op)?;
+    publish_rollup_md(&target, db, &ctx)?;
     Ok(())
 }
 
 /// Re-emit every per-item file + every rollup. Used by the "Republish all"
 /// button after a vault path change.
 pub fn republish_all(db: &Database) -> Result<u32> {
-    let vault_root = match resolve_vault_root(db)? {
-        Some(p) => p,
+    let target = match resolve_vault_target(db)? {
+        Some(t) => t,
         None => return Ok(0),
     };
 
@@ -80,11 +81,11 @@ pub fn republish_all(db: &Database) -> Result<u32> {
                 continue;
             }
         };
-        if let Err(e) = republish_item_full(&vault_root, &ctx) {
+        if let Err(e) = republish_item_full(&target, &ctx) {
             log::warn!("vault: republish item {item_id}: {e}");
             continue;
         }
-        if let Err(e) = publish_rollup_md(&vault_root, db, &ctx) {
+        if let Err(e) = publish_rollup_md(&target, db, &ctx) {
             log::warn!("vault: rollup for item {item_id}: {e}");
         }
         count += 1;
@@ -92,7 +93,15 @@ pub fn republish_all(db: &Database) -> Result<u32> {
     Ok(count)
 }
 
-fn resolve_vault_root(db: &Database) -> Result<Option<PathBuf>> {
+/// Resolved vault destination: canonical user-chosen root + slugged subfolder.
+/// `root` is canonicalized (must exist); `subfolder` may not exist yet — it
+/// is created lazily on first write.
+struct VaultTarget {
+    root: PathBuf,
+    subfolder: String,
+}
+
+fn resolve_vault_target(db: &Database) -> Result<Option<VaultTarget>> {
     let raw = match db.get_setting(VAULT_SETTING_KEY)? {
         Some(s) if !s.trim().is_empty() => s,
         _ => return Ok(None),
@@ -104,7 +113,20 @@ fn resolve_vault_root(db: &Database) -> Result<Option<PathBuf>> {
     let canon = p
         .canonicalize()
         .with_context(|| format!("canonicalize vault path {:?}", p))?;
-    Ok(Some(canon))
+    let subfolder = resolve_subfolder(db)?;
+    Ok(Some(VaultTarget { root: canon, subfolder }))
+}
+
+fn resolve_subfolder(db: &Database) -> Result<String> {
+    let raw = db
+        .get_setting(SUBFOLDER_SETTING_KEY)?
+        .unwrap_or_default();
+    let cleaned = slug(raw.trim());
+    Ok(if cleaned.is_empty() || cleaned == "_" {
+        DEFAULT_SUBFOLDER.to_string()
+    } else {
+        cleaned
+    })
 }
 
 struct ItemContext {
@@ -150,9 +172,9 @@ fn build_group_chain(db: &Database, leaf_group_id: Option<i64>) -> Result<Vec<Gr
 
 // ---- Per-item markdown ----------------------------------------------------
 
-fn publish_item_md(vault_root: &Path, ctx: &ItemContext, op: &VaultOp) -> Result<()> {
-    let target = compute_item_md_path(vault_root, ctx);
-    ensure_within(vault_root, &target)?;
+fn publish_item_md(vt: &VaultTarget, ctx: &ItemContext, op: &VaultOp) -> Result<()> {
+    let target = compute_item_md_path(vt, ctx);
+    ensure_within(&vt.root, &target)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create parent {parent:?}"))?;
@@ -176,9 +198,9 @@ fn publish_item_md(vault_root: &Path, ctx: &ItemContext, op: &VaultOp) -> Result
 
 /// Full rebuild of the per-item file from DB state. Wipes all `sv:note:*`
 /// blocks and re-emits them in timestamp order.
-fn republish_item_full(vault_root: &Path, ctx: &ItemContext) -> Result<()> {
-    let target = compute_item_md_path(vault_root, ctx);
-    ensure_within(vault_root, &target)?;
+fn republish_item_full(vt: &VaultTarget, ctx: &ItemContext) -> Result<()> {
+    let target = compute_item_md_path(vt, ctx);
+    ensure_within(&vt.root, &target)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -262,11 +284,11 @@ fn build_note_block(note: &Note, item_uuid: &str) -> String {
 
 // ---- Rollup _index.md per top-level group --------------------------------
 
-fn publish_rollup_md(vault_root: &Path, db: &Database, ctx: &ItemContext) -> Result<()> {
-    let Some(rollup_path) = compute_rollup_path(vault_root, ctx) else {
+fn publish_rollup_md(vt: &VaultTarget, db: &Database, ctx: &ItemContext) -> Result<()> {
+    let Some(rollup_path) = compute_rollup_path(vt, ctx) else {
         return Ok(()); // movies / top-level items have no root group
     };
-    ensure_within(vault_root, &rollup_path)?;
+    ensure_within(&vt.root, &rollup_path)?;
     if let Some(parent) = rollup_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -285,7 +307,7 @@ fn publish_rollup_md(vault_root: &Path, db: &Database, ctx: &ItemContext) -> Res
     content = strip_all_item_blocks(&content);
     let mut block_section = String::new();
     for (item, count) in &items {
-        let block = build_rollup_item_block(vault_root, &ctx.library, root_group, item, *count);
+        let block = build_rollup_item_block(vt, &ctx.library, root_group, item, *count);
         block_section.push_str(&block);
         block_section.push('\n');
     }
@@ -326,20 +348,15 @@ fn ensure_rollup_skeleton(content: &str, root_title: &str) -> String {
 }
 
 fn build_rollup_item_block(
-    vault_root: &Path,
+    vt: &VaultTarget,
     library: &Library,
     root_group: &Group,
     item: &Item,
     note_count: i64,
 ) -> String {
-    let item_path = compute_item_md_path_for(
-        vault_root,
-        library,
-        root_group,
-        item,
-    );
+    let item_path = compute_item_md_path_for(vt, library, root_group, item);
     let rel = item_path
-        .strip_prefix(vault_root)
+        .strip_prefix(&vt.root)
         .unwrap_or(&item_path)
         .with_extension("");
     let link_target = rel.to_string_lossy().replace('\\', "/");
@@ -471,8 +488,8 @@ fn yaml_str(s: &str) -> String {
 
 // ---- Path helpers ---------------------------------------------------------
 
-fn compute_item_md_path(vault_root: &Path, ctx: &ItemContext) -> PathBuf {
-    let mut p = vault_root.join(SUBFOLDER);
+fn compute_item_md_path(vt: &VaultTarget, ctx: &ItemContext) -> PathBuf {
+    let mut p = vt.root.join(&vt.subfolder);
     p.push(slug(&ctx.library.name));
     for g in &ctx.group_chain {
         p.push(slug(&g.title));
@@ -482,7 +499,7 @@ fn compute_item_md_path(vault_root: &Path, ctx: &ItemContext) -> PathBuf {
 }
 
 fn compute_item_md_path_for(
-    vault_root: &Path,
+    vt: &VaultTarget,
     library: &Library,
     root_group: &Group,
     item: &Item,
@@ -491,16 +508,16 @@ fn compute_item_md_path_for(
     // full chain. Approximation: place under {library}/{rootGroup}/{itemTitle}.
     // Items at deeper levels still link correctly because Obsidian wikilinks
     // resolve by filename inside a vault; the relative path is a hint only.
-    let mut p = vault_root.join(SUBFOLDER);
+    let mut p = vt.root.join(&vt.subfolder);
     p.push(slug(&library.name));
     p.push(slug(&root_group.title));
     p.push(format!("{}.md", slug(&item.title)));
     p
 }
 
-fn compute_rollup_path(vault_root: &Path, ctx: &ItemContext) -> Option<PathBuf> {
+fn compute_rollup_path(vt: &VaultTarget, ctx: &ItemContext) -> Option<PathBuf> {
     let root = ctx.group_chain.first()?;
-    let mut p = vault_root.join(SUBFOLDER);
+    let mut p = vt.root.join(&vt.subfolder);
     p.push(slug(&ctx.library.name));
     p.push(slug(&root.title));
     p.push(ROLLUP_FILE);
