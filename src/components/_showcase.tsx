@@ -79,16 +79,18 @@ export default function Showcase() {
 
         <LibrarySection title="Continue Watching">
           <ItemCard
+            id={1}
             title="Rust ownership in 10 minutes"
             subtitle="Rust Course — Module 2"
             progressPercent={42}
-            onClick={() => {}}
+            onActivate={() => {}}
           />
           <ItemCard
+            id={2}
             title="React 19 hooks tour"
             subtitle="Frontend Course — Module 1"
             progressPercent={87}
-            onClick={() => {}}
+            onActivate={() => {}}
           />
           <ItemCard.Skeleton />
         </LibrarySection>
@@ -96,17 +98,19 @@ export default function Showcase() {
         <LibrarySection title="Courses">
           <div className="grid w-full grid-cols-3 gap-4">
             <GroupCard
+              id={1}
               title="Rust Programming"
               kind="courses"
               completedCount={12}
               totalCount={47}
-              onClick={() => {}}
+              onActivate={() => {}}
             />
             <GroupCard
+              id={2}
               title="Breaking Hexapods"
               kind="series"
               nextEpisode="S02E04"
-              onClick={() => {}}
+              onActivate={() => {}}
             />
             <GroupCard.Skeleton />
           </div>
@@ -114,14 +118,15 @@ export default function Showcase() {
 
         <LibrarySection title="Movies">
           <div className="grid w-full grid-cols-4 gap-4">
-            <MovieCard title="Test Drive" status="unwatched" />
+            <MovieCard id={1} title="Test Drive" status="unwatched" />
             <MovieCard
+              id={2}
               title="Rebuilding Babel"
               status="in-progress"
               progressPercent={30}
               durationLabel="1h 42m"
             />
-            <MovieCard title="The Final Commit" status="watched" />
+            <MovieCard id={3} title="The Final Commit" status="watched" />
             <MovieCard.Skeleton />
           </div>
         </LibrarySection>

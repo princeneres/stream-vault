@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import CommandPalette from "@/components/CommandPalette";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
-import NoteCaptureModal, {
+import {
   type NoteCaptureContext,
 } from "@/components/NoteCaptureModal";
-import ShortcutsDialog from "@/components/ShortcutsDialog";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
 import { ToastProvider, useToast } from "@/components/Toast";
 import {
@@ -21,10 +27,18 @@ import {
 } from "@/lib/api";
 import { type Route, useRoute } from "@/lib/router";
 import type { Library, NoteSavedEvent } from "@/lib/types";
-import DetailView from "@/views/DetailView";
+
+// Route-level code splitting: Home is the landing view and stays eager; the
+// heavier screens and overlays load on demand, shrinking the initial bundle
+// parsed at startup. DetailView in particular pulls in the dialog/opener
+// plugins and NotesPanel only when a group is actually opened.
 import Home from "@/views/Home";
-import LibraryView from "@/views/LibraryView";
-import Settings from "@/views/Settings";
+const LibraryView = lazy(() => import("@/views/LibraryView"));
+const DetailView = lazy(() => import("@/views/DetailView"));
+const Settings = lazy(() => import("@/views/Settings"));
+const CommandPalette = lazy(() => import("@/components/CommandPalette"));
+const ShortcutsDialog = lazy(() => import("@/components/ShortcutsDialog"));
+const NoteCaptureModal = lazy(() => import("@/components/NoteCaptureModal"));
 
 export default function App() {
   const [view, setView] = useRoute();
@@ -92,15 +106,18 @@ export default function App() {
     };
   }, []);
 
-  const sidebarItems: SidebarItem[] = [
-    { id: "home", label: "Home", icon: <HomeIcon size={14} /> },
-    ...libraries.map((lib) => ({
-      id: `library:${lib.id}`,
-      label: lib.name,
-      icon: <KindIcon kind={lib.kind} size={14} />,
-    })),
-    { id: "settings", label: "Settings", icon: <SettingsIcon size={14} /> },
-  ];
+  const sidebarItems: SidebarItem[] = useMemo(
+    () => [
+      { id: "home", label: "Home", icon: <HomeIcon size={14} /> },
+      ...libraries.map((lib) => ({
+        id: `library:${lib.id}`,
+        label: lib.name,
+        icon: <KindIcon kind={lib.kind} size={14} />,
+      })),
+      { id: "settings", label: "Settings", icon: <SettingsIcon size={14} /> },
+    ],
+    [libraries],
+  );
 
   const activeId =
     view.kind === "home"
@@ -111,14 +128,17 @@ export default function App() {
           ? `library:${view.id}`
           : null;
 
-  const handleSelect = (id: string) => {
-    if (id === "home") setView({ kind: "home" });
-    else if (id === "settings") setView({ kind: "settings" });
-    else if (id.startsWith("library:")) {
-      const libId = Number(id.slice("library:".length));
-      if (!Number.isNaN(libId)) setView({ kind: "library", id: libId });
-    }
-  };
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (id === "home") setView({ kind: "home" });
+      else if (id === "settings") setView({ kind: "settings" });
+      else if (id.startsWith("library:")) {
+        const libId = Number(id.slice("library:".length));
+        if (!Number.isNaN(libId)) setView({ kind: "library", id: libId });
+      }
+    },
+    [setView],
+  );
 
   return (
     <ToastProvider>
@@ -136,6 +156,22 @@ export default function App() {
         />
       </ConfirmProvider>
     </ToastProvider>
+  );
+}
+
+function ViewFallback() {
+  return (
+    <div className="space-y-6 px-8 py-6" aria-busy="true" aria-label="Loading">
+      <div className="h-8 w-1/3 animate-pulse rounded-(--radius-card) bg-(--color-surface-raised)" />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div
+            key={i}
+            className="aspect-video animate-pulse rounded-(--radius-card) bg-(--color-surface-raised)"
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -213,6 +249,15 @@ function AppShell({
       if (unlistenFn) unlistenFn();
     };
   }, [triggerNoteCapture]);
+
+  const openLibrary = useCallback(
+    (id: number) => setView({ kind: "library", id }),
+    [setView],
+  );
+  const openGroup = useCallback(
+    (id: number) => setView({ kind: "group", id }),
+    [setView],
+  );
 
   const closeNoteCapture = useCallback(() => {
     setCaptureCtx(null);
@@ -298,46 +343,59 @@ function AppShell({
         onSearch={() => setPaletteOpen(true)}
         onShortcuts={() => setShortcutsOpen(true)}
       />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onOpenGroup={(id) => {
-          setView({ kind: "group", id });
-          setPaletteOpen(false);
-        }}
-      />
-      <ShortcutsDialog
-        open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
-      />
-      <NoteCaptureModal context={captureCtx} onClose={closeNoteCapture} />
+      {/* Overlays mount only while open so their lazy chunks load on first
+          use rather than at startup. A null fallback is fine — the chunk
+          lands within a frame or two and the trigger already gave feedback. */}
+      <Suspense fallback={null}>
+        {paletteOpen ? (
+          <CommandPalette
+            open={paletteOpen}
+            onClose={() => setPaletteOpen(false)}
+            onOpenGroup={(id) => {
+              setView({ kind: "group", id });
+              setPaletteOpen(false);
+            }}
+          />
+        ) : null}
+        {shortcutsOpen ? (
+          <ShortcutsDialog
+            open={shortcutsOpen}
+            onClose={() => setShortcutsOpen(false)}
+          />
+        ) : null}
+        {captureCtx ? (
+          <NoteCaptureModal context={captureCtx} onClose={closeNoteCapture} />
+        ) : null}
+      </Suspense>
       <main
         id="main"
         tabIndex={-1}
         className="flex-1 overflow-y-auto outline-none"
       >
-        {view.kind === "home" ? (
-          <Home
-            libraries={libraries}
-            onOpenLibrary={(id) => setView({ kind: "library", id })}
-            onOpenGroup={(id) => setView({ kind: "group", id })}
-            progressTick={progressTick}
-          />
-        ) : view.kind === "library" ? (
-          <LibraryView
-            libraryId={view.id}
-            onOpenGroup={(id) => setView({ kind: "group", id })}
-            progressTick={progressTick}
-          />
-        ) : view.kind === "group" ? (
-          <DetailView
-            groupId={view.id}
-            progressTick={progressTick}
-            notesTick={notesTick}
-          />
-        ) : (
-          <Settings onLibrariesChanged={refreshLibraries} />
-        )}
+        <Suspense fallback={<ViewFallback />}>
+          {view.kind === "home" ? (
+            <Home
+              libraries={libraries}
+              onOpenLibrary={openLibrary}
+              onOpenGroup={openGroup}
+              progressTick={progressTick}
+            />
+          ) : view.kind === "library" ? (
+            <LibraryView
+              libraryId={view.id}
+              onOpenGroup={openGroup}
+              progressTick={progressTick}
+            />
+          ) : view.kind === "group" ? (
+            <DetailView
+              groupId={view.id}
+              progressTick={progressTick}
+              notesTick={notesTick}
+            />
+          ) : (
+            <Settings onLibrariesChanged={refreshLibraries} />
+          )}
+        </Suspense>
       </main>
     </div>
   );

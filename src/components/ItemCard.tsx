@@ -4,15 +4,17 @@ import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
 
 export interface ItemCardProps {
+  /** Item id passed back to id-based handlers so callers can keep them stable. */
+  id: number;
   title: string;
   thumbnail?: string | null;
   progressPercent?: number;
   subtitle?: string;
   completed?: boolean;
   noteCount?: number;
-  onToggleCompleted?: (next: boolean) => void;
-  onClick?: () => void;
-  onPlay?: () => void;
+  onToggleCompleted?: (id: number, next: boolean) => void;
+  onActivate?: (id: number) => void;
+  onPlay?: (id: number) => void;
   className?: string;
 }
 
@@ -22,6 +24,7 @@ const CV_STYLE = {
 } as const;
 
 function ItemCardImpl({
+  id,
   title,
   thumbnail,
   progressPercent,
@@ -29,21 +32,21 @@ function ItemCardImpl({
   completed,
   noteCount,
   onToggleCompleted,
-  onClick,
+  onActivate,
   onPlay,
   className,
 }: ItemCardProps) {
-  const interactive = Boolean(onClick);
+  const interactive = Boolean(onActivate);
   const Wrapper = interactive ? "button" : "div";
   return (
     <Wrapper
       type={interactive ? "button" : undefined}
-      onClick={onClick}
+      onClick={onActivate ? () => onActivate(id) : undefined}
       style={CV_STYLE}
       className={cn(
         "group relative flex w-56 shrink-0 flex-col gap-2 text-left",
         interactive &&
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) rounded-(--radius-card)",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) rounded-(--radius-card) motion-safe:transition-transform motion-safe:duration-100 motion-safe:active:scale-[0.98]",
         className,
       )}
     >
@@ -82,7 +85,7 @@ function ItemCardImpl({
             <input
               type="checkbox"
               checked={Boolean(completed)}
-              onChange={(e) => onToggleCompleted(e.currentTarget.checked)}
+              onChange={(e) => onToggleCompleted(id, e.currentTarget.checked)}
               className="h-4 w-4 cursor-pointer accent-(--color-accent)"
             />
           </label>
@@ -92,7 +95,7 @@ function ItemCardImpl({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onPlay();
+              onPlay(id);
             }}
             aria-label="Play"
             className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-(--radius-pill) bg-(--color-bg)/80 text-(--color-text-primary) opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"

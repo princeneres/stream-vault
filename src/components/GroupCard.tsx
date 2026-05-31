@@ -10,13 +10,14 @@ const CV_STYLE = {
 } as const;
 
 export interface GroupCardProps {
+  id: number;
   title: string;
   poster?: string | null;
   kind: LibraryKind;
   completedCount?: number;
   totalCount?: number;
   nextEpisode?: string;
-  onClick?: () => void;
+  onActivate?: (id: number) => void;
   className?: string;
 }
 
@@ -37,16 +38,17 @@ function metadata(props: GroupCardProps): string | null {
 }
 
 function GroupCardImpl(props: GroupCardProps) {
-  const { title, poster, kind, onClick, className } = props;
+  const { id, title, poster, kind, onActivate, className } = props;
   const meta = metadata(props);
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={onActivate ? () => onActivate(id) : undefined}
       style={CV_STYLE}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
+        "motion-safe:transition-transform motion-safe:duration-100 motion-safe:active:scale-[0.98]",
         className,
       )}
     >

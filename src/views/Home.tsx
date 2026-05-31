@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Library as LibraryIcon,
@@ -8,13 +8,14 @@ import EmptyState from "@/components/EmptyState";
 import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
 import LibrarySection from "@/components/LibrarySection";
-import MovieCard, { type MovieStatus } from "@/components/MovieCard";
+import MovieCard from "@/components/MovieCard";
+import { getContinueWatching, getLibraryContents, playItem } from "@/lib/api";
 import {
-  convertFileSrc,
-  getContinueWatching,
-  getLibraryContents,
-  playItem,
-} from "@/lib/api";
+  episodeLabel,
+  movieStatus,
+  progressPercent,
+  thumbSrc,
+} from "@/lib/itemDisplay";
 import type {
   ItemWithProgress,
   Library,
@@ -27,32 +28,6 @@ export interface HomeProps {
   onOpenGroup: (id: number) => void;
   /** Bumped by the App when item-progress fires; refetches Continue Watching. */
   progressTick: number;
-}
-
-function thumbSrc(path: string | null | undefined): string | undefined {
-  return path ? convertFileSrc(path) : undefined;
-}
-
-function progressPercent(item: ItemWithProgress): number | undefined {
-  if (!item.progress || !item.durationSeconds || item.durationSeconds <= 0) {
-    return undefined;
-  }
-  return Math.round((item.progress.positionSeconds / item.durationSeconds) * 100);
-}
-
-function movieStatus(item: ItemWithProgress): MovieStatus {
-  if (item.progress?.completed) return "watched";
-  if (item.progress) return "in-progress";
-  return "unwatched";
-}
-
-function episodeLabel(item: ItemWithProgress): string | null {
-  if (item.seasonNumber != null && item.episodeNumber != null) {
-    const s = String(item.seasonNumber).padStart(2, "0");
-    const e = String(item.episodeNumber).padStart(2, "0");
-    return `S${s}E${e}`;
-  }
-  return null;
 }
 
 function remainingLabel(item: ItemWithProgress): string | null {
@@ -69,7 +44,7 @@ function remainingLabel(item: ItemWithProgress): string | null {
 
 function continueSubtitle(item: ItemWithProgress): string | undefined {
   const parts = [episodeLabel(item), remainingLabel(item)].filter(
-    (x): x is string => x !== null,
+    (x): x is string => x != null,
   );
   return parts.length ? parts.join(" · ") : undefined;
 }
@@ -102,6 +77,8 @@ export default function Home({
     };
   }, [progressTick]);
 
+  // Refetch on progressTick too so library card counts (e.g. "3 / 10 watched")
+  // update live as items complete, matching Continue Watching above.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -124,7 +101,11 @@ export default function Home({
     return () => {
       cancelled = true;
     };
-  }, [libraries]);
+  }, [libraries, progressTick]);
+
+  const handlePlay = useCallback((id: number) => {
+    playItem(id).catch((e) => console.error("playItem failed", e));
+  }, []);
 
   const stats = useMemo(() => {
     let total = 0;
@@ -184,11 +165,12 @@ export default function Home({
           {continueWatching.map((item) => (
             <ItemCard
               key={item.id}
+              id={item.id}
               title={item.title}
               subtitle={continueSubtitle(item)}
               thumbnail={thumbSrc(item.thumbnailPath)}
               progressPercent={progressPercent(item)}
-              onClick={() => playItem(item.id)}
+              onActivate={handlePlay}
             />
           ))}
         </LibrarySection>
@@ -218,11 +200,12 @@ export default function Home({
               {contents.topItems.slice(0, 12).map((item) => (
                 <div key={item.id} className="w-40 shrink-0 snap-start">
                   <MovieCard
+                    id={item.id}
                     title={item.title}
                     poster={thumbSrc(item.thumbnailPath)}
                     status={movieStatus(item)}
                     progressPercent={progressPercent(item)}
-                    onClick={() => playItem(item.id)}
+                    onActivate={handlePlay}
                   />
                 </div>
               ))}
@@ -241,12 +224,13 @@ export default function Home({
             {contents.groups.slice(0, 12).map((group) => (
               <div key={group.id} className="w-56 shrink-0 snap-start">
                 <GroupCard
+                  id={group.id}
                   title={group.title}
                   poster={thumbSrc(group.posterPath)}
                   kind={lib.kind}
                   totalCount={group.itemCount}
                   completedCount={group.completedCount}
-                  onClick={() => onOpenGroup(group.id)}
+                  onActivate={onOpenGroup}
                 />
               </div>
             ))}

@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Inbox } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
-import MovieCard, { type MovieStatus } from "@/components/MovieCard";
+import MovieCard from "@/components/MovieCard";
 import ViewControls from "@/components/ViewControls";
-import { convertFileSrc, getLibraryContents, playItem } from "@/lib/api";
-import type { ItemWithProgress, LibraryContents } from "@/lib/types";
+import { getLibraryContents, playItem } from "@/lib/api";
+import { movieStatus, progressPercent, thumbSrc } from "@/lib/itemDisplay";
+import type { LibraryContents } from "@/lib/types";
 import {
   applyGroupPrefs,
   applyItemPrefs,
@@ -19,23 +20,6 @@ export interface LibraryViewProps {
   onOpenGroup: (groupId: number) => void;
   /** Bumped by the App when item-progress fires; refetches contents. */
   progressTick: number;
-}
-
-function thumbSrc(path: string | null | undefined): string | undefined {
-  return path ? convertFileSrc(path) : undefined;
-}
-
-function progressPercent(item: ItemWithProgress): number | undefined {
-  if (!item.progress || !item.durationSeconds || item.durationSeconds <= 0) {
-    return undefined;
-  }
-  return Math.round((item.progress.positionSeconds / item.durationSeconds) * 100);
-}
-
-function movieStatus(item: ItemWithProgress): MovieStatus {
-  if (item.progress?.completed) return "watched";
-  if (item.progress) return "in-progress";
-  return "unwatched";
 }
 
 export default function LibraryView({
@@ -66,6 +50,10 @@ export default function LibraryView({
       cancelled = true;
     };
   }, [libraryId, progressTick]);
+
+  const handlePlay = useCallback((id: number) => {
+    playItem(id).catch((e) => console.error("playItem failed", e));
+  }, []);
 
   const sortedGroups = useMemo(
     () => applyGroupPrefs(contents?.groups ?? [], prefs),
@@ -153,11 +141,12 @@ export default function LibraryView({
           {sortedTopItems.map((item) => (
             <MovieCard
               key={item.id}
+              id={item.id}
               title={item.title}
               poster={thumbSrc(item.thumbnailPath)}
               status={movieStatus(item)}
               progressPercent={progressPercent(item)}
-              onClick={() => playItem(item.id)}
+              onActivate={handlePlay}
             />
           ))}
         </div>
@@ -172,10 +161,11 @@ export default function LibraryView({
                 {sortedTopItems.map((item) => (
                   <ItemCard
                     key={item.id}
+                    id={item.id}
                     title={item.title}
                     thumbnail={thumbSrc(item.thumbnailPath)}
                     progressPercent={progressPercent(item)}
-                    onClick={() => playItem(item.id)}
+                    onActivate={handlePlay}
                   />
                 ))}
               </div>
@@ -185,12 +175,13 @@ export default function LibraryView({
             {sortedGroups.map((group) => (
               <GroupCard
                 key={group.id}
+                id={group.id}
                 title={group.title}
                 poster={thumbSrc(group.posterPath)}
                 kind={library.kind}
                 totalCount={group.itemCount}
                 completedCount={group.completedCount}
-                onClick={() => onOpenGroup(group.id)}
+                onActivate={onOpenGroup}
               />
             ))}
           </div>

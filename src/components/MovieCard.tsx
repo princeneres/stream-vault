@@ -11,12 +11,13 @@ const CV_STYLE = {
 export type MovieStatus = "unwatched" | "in-progress" | "watched";
 
 export interface MovieCardProps {
+  id: number;
   title: string;
   poster?: string | null;
   status: MovieStatus;
   progressPercent?: number;
   durationLabel?: string;
-  onClick?: () => void;
+  onActivate?: (id: number) => void;
   className?: string;
 }
 
@@ -38,12 +39,13 @@ const statusBadge: Record<
 };
 
 function MovieCardImpl({
+  id,
   title,
   poster,
   status,
   progressPercent,
   durationLabel,
-  onClick,
+  onActivate,
   className,
 }: MovieCardProps) {
   const badge = statusBadge[status];
@@ -51,11 +53,12 @@ function MovieCardImpl({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={onActivate ? () => onActivate(id) : undefined}
       style={CV_STYLE}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
+        "motion-safe:transition-transform motion-safe:duration-100 motion-safe:active:scale-[0.98]",
         className,
       )}
     >

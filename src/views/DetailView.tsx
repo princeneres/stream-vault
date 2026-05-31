@@ -1,6 +1,7 @@
 import {
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -46,6 +47,11 @@ import {
   setGroupPoster,
   setItemCompleted,
 } from "@/lib/api";
+import {
+  episodeLabel,
+  progressPercent,
+  thumbSrc,
+} from "@/lib/itemDisplay";
 import type {
   Attachment,
   AttachmentKind,
@@ -68,26 +74,6 @@ export interface DetailViewProps {
 }
 
 type TreeCache = Map<number, GroupDetail>;
-
-function thumbSrc(path: string | null | undefined): string | undefined {
-  return path ? convertFileSrc(path) : undefined;
-}
-
-function progressPercent(item: ItemWithProgress): number | undefined {
-  if (!item.progress || !item.durationSeconds || item.durationSeconds <= 0) {
-    return undefined;
-  }
-  return Math.round((item.progress.positionSeconds / item.durationSeconds) * 100);
-}
-
-function episodeLabel(item: ItemWithProgress): string | undefined {
-  if (item.seasonNumber != null && item.episodeNumber != null) {
-    const s = String(item.seasonNumber).padStart(2, "0");
-    const e = String(item.episodeNumber).padStart(2, "0");
-    return `S${s}E${e}`;
-  }
-  return undefined;
-}
 
 function attachmentIcon(kind: AttachmentKind, size = 18) {
   const props = { size, "aria-hidden": true } as const;
@@ -189,11 +175,13 @@ function AttachmentList({ attachments }: { attachments: Attachment[] }) {
 function ItemGrid({
   items,
   onToggle,
+  onActivate,
   prefs,
   noteCounts,
 }: {
   items: ItemWithProgress[];
-  onToggle: (item: ItemWithProgress, next: boolean) => void;
+  onToggle: (id: number, next: boolean) => void;
+  onActivate: (id: number) => void;
   prefs: ViewPrefs;
   noteCounts: Record<number, number>;
 }) {
@@ -206,14 +194,15 @@ function ItemGrid({
         return (
           <ItemCard
             key={item.id}
+            id={item.id}
             title={item.title}
             subtitle={ep}
             thumbnail={thumbSrc(item.thumbnailPath)}
             progressPercent={progressPercent(item)}
             completed={completed}
             noteCount={noteCounts[item.id]}
-            onToggleCompleted={(next) => onToggle(item, next)}
-            onClick={() => playItem(item.id)}
+            onToggleCompleted={onToggle}
+            onActivate={onActivate}
           />
         );
       })}
@@ -230,6 +219,7 @@ const SubgroupSection = memo(function SubgroupSection({
   onLoaded,
   refreshTick,
   onItemToggle,
+  onItemActivate,
   onGroupToggle,
   prefs,
   noteCounts,
@@ -241,7 +231,8 @@ const SubgroupSection = memo(function SubgroupSection({
   cache: TreeCache;
   onLoaded: (detail: GroupDetail) => void;
   refreshTick: number;
-  onItemToggle: (item: ItemWithProgress, next: boolean) => void;
+  onItemToggle: (id: number, next: boolean) => void;
+  onItemActivate: (id: number) => void;
   onGroupToggle: (group: Group, next: boolean) => void;
   prefs: ViewPrefs;
   noteCounts: Record<number, number>;
@@ -316,6 +307,7 @@ const SubgroupSection = memo(function SubgroupSection({
               <ItemGrid
                 items={detail.items}
                 onToggle={onItemToggle}
+                onActivate={onItemActivate}
                 prefs={prefs}
                 noteCounts={noteCounts}
               />
@@ -334,6 +326,7 @@ const SubgroupSection = memo(function SubgroupSection({
                 onLoaded={onLoaded}
                 refreshTick={refreshTick}
                 onItemToggle={onItemToggle}
+                onItemActivate={onItemActivate}
                 onGroupToggle={onGroupToggle}
                 prefs={prefs}
                 noteCounts={noteCounts}
@@ -545,9 +538,9 @@ export default function DetailView({
   }, [groupId]);
 
   const handleItemToggle = useCallback(
-    async (item: ItemWithProgress, next: boolean) => {
+    async (itemId: number, next: boolean) => {
       try {
-        await setItemCompleted(item.id, next);
+        await setItemCompleted(itemId, next);
         bumpRefresh();
       } catch (e) {
         console.error("setItemCompleted failed", e);
@@ -555,6 +548,10 @@ export default function DetailView({
     },
     [bumpRefresh],
   );
+
+  const handleItemActivate = useCallback((itemId: number) => {
+    playItem(itemId).catch((e) => console.error("playItem failed", e));
+  }, []);
 
   const handleGroupToggle = useCallback(
     async (group: Group, next: boolean) => {
@@ -669,11 +666,15 @@ export default function DetailView({
 
   const trimmedQuery = query.trim();
   const searchActive = trimmedQuery.length > 0;
+  // Defer the value that drives the (potentially large) tree walk so typing
+  // stays responsive: React keeps the input live and recomputes matches at a
+  // lower priority instead of on every synchronous keystroke.
+  const deferredQuery = useDeferredValue(trimmedQuery);
   const allLoaded = useMemo(() => {
-    if (!detail) return false;
+    if (!searchActive || !detail) return false;
     const groups = collectAllGroupIds(groupId, cache);
     return groups.every((id) => cache.has(id));
-  }, [groupId, cache, detail]);
+  }, [searchActive, groupId, cache, detail]);
 
   // Auto-load subtree once when search becomes active.
   useEffect(() => {
@@ -694,8 +695,8 @@ export default function DetailView({
   }, [searchActive, allLoaded, loadFullSubtree]);
 
   const matches = useMemo(
-    () => (searchActive ? collectMatches(groupId, cache, trimmedQuery) : []),
-    [searchActive, groupId, cache, trimmedQuery],
+    () => (deferredQuery ? collectMatches(groupId, cache, deferredQuery) : []),
+    [deferredQuery, groupId, cache],
   );
 
   if (error) {
@@ -721,7 +722,6 @@ export default function DetailView({
 
   const { group, subgroups, items, attachments } = detail;
   const poster = thumbSrc(group.posterPath);
-  const combinedTick = progressTick + refreshTick;
   const hasContents =
     items.length > 0 || subgroups.length > 0 || attachments.length > 0;
   const expandAllBusy = busyAction === "expand-all";
@@ -882,6 +882,7 @@ export default function DetailView({
               <ItemGrid
                 items={items}
                 onToggle={handleItemToggle}
+                onActivate={handleItemActivate}
                 prefs={prefs}
                 noteCounts={noteCounts}
               />
@@ -899,8 +900,9 @@ export default function DetailView({
                 onSetExpanded={setExpanded}
                 cache={cache}
                 onLoaded={cacheLoaded}
-                refreshTick={combinedTick}
+                refreshTick={refreshTick}
                 onItemToggle={handleItemToggle}
+                onItemActivate={handleItemActivate}
                 onGroupToggle={handleGroupToggle}
                 prefs={prefs}
                 noteCounts={noteCounts}

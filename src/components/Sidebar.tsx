@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { Keyboard, Search } from "lucide-react";
 import { cn } from "./cn";
 
@@ -25,7 +25,7 @@ const QUICK_SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["?"], label: "More" },
 ];
 
-export default function Sidebar({
+function Sidebar({
   items,
   activeId,
   onSelect,
@@ -131,3 +131,5 @@ export default function Sidebar({
     </aside>
   );
 }
+
+export default memo(Sidebar);
