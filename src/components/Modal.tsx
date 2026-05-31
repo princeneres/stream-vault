@@ -18,7 +18,29 @@ export default function Modal({ open, onClose, title, children, className }: Mod
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Focus trap: keep Tab cycling within the dialog.
+      if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusable = root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || active === root)) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
@@ -30,7 +52,12 @@ export default function Modal({ open, onClose, title, children, className }: Mod
   }, [open, onClose]);
 
   useEffect(() => {
-    if (open) dialogRef.current?.focus();
+    if (!open) return;
+    // Remember what had focus so we can return it when the dialog closes,
+    // keeping keyboard users where they left off.
+    const trigger = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => trigger?.focus?.();
   }, [open]);
 
   if (!open) return null;
@@ -38,7 +65,7 @@ export default function Modal({ open, onClose, title, children, className }: Mod
 
   return createPortal(
     <div
-      className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-(--color-overlay) p-4"
+      className="motion-safe:animate-overlay-in fixed inset-0 z-(--z-modal) flex items-center justify-center bg-(--color-overlay) p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -50,7 +77,7 @@ export default function Modal({ open, onClose, title, children, className }: Mod
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "w-full max-w-md rounded-(--radius-card-lg) bg-(--color-surface) shadow-(--shadow-modal) outline-none",
+          "motion-safe:animate-dialog-in w-full max-w-md rounded-(--radius-card-lg) bg-(--color-surface) shadow-(--shadow-modal) outline-none",
           "border border-(--color-border-subtle)",
           className,
         )}

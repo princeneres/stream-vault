@@ -54,6 +54,46 @@
 
   /* Sidebar width */
   --layout-sidebar: 240px;
+
+  /* Motion — shared durations + easing so transitions feel consistent */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+/* Shared entrance animations (overlays, toasts). Guarded by the
+   prefers-reduced-motion block below, which collapses their duration. */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+.animate-overlay-in {
+  animation: overlay-in var(--duration-base) var(--ease-out) both;
+}
+.animate-dialog-in {
+  animation: dialog-in var(--duration-base) var(--ease-out) both;
+  will-change: transform, opacity;
+}
+.animate-toast-in {
+  animation: toast-in var(--duration-base) var(--ease-out) both;
+}
+.animate-toast-out {
+  animation: toast-out var(--duration-fast) var(--ease-standard) both;
 }
 
 html {

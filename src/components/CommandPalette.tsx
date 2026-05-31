@@ -74,6 +74,7 @@ export default function CommandPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -84,6 +85,13 @@ export default function CommandPalette({
       setQuery("");
       setResults(null);
     }
+  }, [open]);
+
+  // Restore focus to the trigger when the palette closes.
+  useEffect(() => {
+    if (!open) return;
+    const trigger = document.activeElement as HTMLElement | null;
+    return () => trigger?.focus?.();
   }, [open]);
 
   useEffect(() => {
@@ -147,6 +155,24 @@ export default function CommandPalette({
           e.preventDefault();
           choose(row);
         }
+      } else if (e.key === "Tab") {
+        // Trap focus within the dialog.
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusable = root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || active === root)) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     document.addEventListener("keydown", onKey);
@@ -158,16 +184,17 @@ export default function CommandPalette({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-(--z-modal) flex items-start justify-center bg-(--color-overlay) p-4 pt-[10vh]"
+      className="motion-safe:animate-overlay-in fixed inset-0 z-(--z-modal) flex items-start justify-center bg-(--color-overlay) p-4 pt-[10vh]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Search"
-        className="w-full max-w-xl overflow-hidden rounded-(--radius-card-lg) border border-(--color-border-subtle) bg-(--color-surface) shadow-(--shadow-modal)"
+        className="motion-safe:animate-dialog-in w-full max-w-xl overflow-hidden rounded-(--radius-card-lg) border border-(--color-border-subtle) bg-(--color-surface) shadow-(--shadow-modal)"
       >
         <div className="flex items-center gap-2 border-b border-(--color-border-subtle) px-4">
           <Search
