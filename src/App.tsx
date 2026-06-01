@@ -9,22 +9,20 @@ import {
 } from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import KindIcon from "@/components/KindIcon";
 import {
   type NoteCaptureContext,
 } from "@/components/NoteCaptureModal";
+import type { PlayerRequest } from "@/components/PlayerOverlay";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
 import { ToastProvider, useToast } from "@/components/Toast";
+import { listLibraries, onItemProgress, onNoteSaved } from "@/lib/api";
 import {
-  listLibraries,
-  mpvCurrentItemId,
-  mpvGetPosition,
-  mpvSetPaused,
-  onItemProgress,
-  onNoteSaved,
-} from "@/lib/api";
+  PlayerContext,
+  type PlayerContextValue,
+  type PlayerControls,
+} from "@/lib/player";
 import { type Route, useRoute } from "@/lib/router";
 import type { Library, NoteSavedEvent } from "@/lib/types";
 
@@ -39,6 +37,7 @@ const Settings = lazy(() => import("@/views/Settings"));
 const CommandPalette = lazy(() => import("@/components/CommandPalette"));
 const ShortcutsDialog = lazy(() => import("@/components/ShortcutsDialog"));
 const NoteCaptureModal = lazy(() => import("@/components/NoteCaptureModal"));
+const PlayerOverlay = lazy(() => import("@/components/PlayerOverlay"));
 
 export default function App() {
   const [view, setView] = useRoute();
@@ -201,54 +200,33 @@ function AppShell({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [captureCtx, setCaptureCtx] = useState<NoteCaptureContext | null>(null);
+  const [playerRequest, setPlayerRequest] = useState<PlayerRequest | null>(null);
   const toast = useToast();
-  const captureBusyRef = useRef(false);
+  const controlsRef = useRef<PlayerControls | null>(null);
+  const playSeqRef = useRef(0);
 
-  const triggerNoteCapture = useCallback(async () => {
-    if (captureBusyRef.current) return;
-    captureBusyRef.current = true;
-    try {
-      const itemId = await mpvCurrentItemId();
-      if (itemId == null) {
-        toast.push("Start playing a video to capture a note", "info");
-        return;
-      }
-      const pos = (await mpvGetPosition()) ?? 0;
-      mpvSetPaused(true).catch((e) =>
-        console.error("mpvSetPaused failed", e),
-      );
-      // Bring our window forward so the modal isn't hidden behind mpv.
-      try {
-        const w = getCurrentWindow();
-        await w.setFocus();
-      } catch (e) {
-        console.error("setFocus failed", e);
-      }
-      setCaptureCtx({ itemId, timestampSec: pos });
-    } catch (e) {
-      console.error("note capture trigger failed", e);
-      toast.push("Could not start note capture", "error");
-    } finally {
-      captureBusyRef.current = false;
+  const play = useCallback((itemId: number, startSeconds?: number) => {
+    playSeqRef.current += 1;
+    setPlayerRequest({ itemId, startSeconds, seq: playSeqRef.current });
+  }, []);
+
+  const closePlayer = useCallback(() => setPlayerRequest(null), []);
+
+  const playerContext = useMemo<PlayerContextValue>(
+    () => ({ play, close: closePlayer, controlsRef }),
+    [play, closePlayer],
+  );
+
+  const triggerNoteCapture = useCallback(() => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      toast.push("Start playing a video to capture a note", "info");
+      return;
     }
+    const pos = controls.getCurrentTime();
+    controls.pause();
+    setCaptureCtx({ itemId: controls.itemId, timestampSec: pos });
   }, [toast]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlistenFn: (() => void) | null = null;
-    listen("note-capture-requested", () => triggerNoteCapture())
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlistenFn = fn;
-      })
-      .catch((e) =>
-        console.error("note-capture-requested subscribe failed", e),
-      );
-    return () => {
-      cancelled = true;
-      if (unlistenFn) unlistenFn();
-    };
-  }, [triggerNoteCapture]);
 
   const openLibrary = useCallback(
     (id: number) => setView({ kind: "library", id }),
@@ -261,7 +239,7 @@ function AppShell({
 
   const closeNoteCapture = useCallback(() => {
     setCaptureCtx(null);
-    mpvSetPaused(false).catch((e) => console.error("mpvSetPaused failed", e));
+    controlsRef.current?.resume();
   }, []);
 
   useEffect(() => {
@@ -332,6 +310,7 @@ function AppShell({
   }, [paletteOpen, shortcutsOpen, captureCtx, setView, view.kind, triggerNoteCapture]);
 
   return (
+    <PlayerContext.Provider value={playerContext}>
     <div className="flex h-screen bg-(--color-bg) text-(--color-text-primary)">
       <a href="#main" className="skip-link">
         Skip to main content
@@ -366,6 +345,15 @@ function AppShell({
         {captureCtx ? (
           <NoteCaptureModal context={captureCtx} onClose={closeNoteCapture} />
         ) : null}
+        {playerRequest ? (
+          <PlayerOverlay
+            request={playerRequest}
+            onClose={closePlayer}
+            registerControls={(c) => {
+              controlsRef.current = c;
+            }}
+          />
+        ) : null}
       </Suspense>
       <main
         id="main"
@@ -398,5 +386,6 @@ function AppShell({
         </Suspense>
       </main>
     </div>
+    </PlayerContext.Provider>
   );
 }

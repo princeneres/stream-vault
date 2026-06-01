@@ -32,7 +32,15 @@
     "targets": "all",
     "linux": {
       "deb": {
-        "depends": ["mpv", "ffmpeg"]
+        "depends": ["ffmpeg"]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
       }
     },
     "icon": [

@@ -60,15 +60,23 @@ export function search(query: string): Promise<SearchResults> {
     return invoke<SearchResults>("search", { query });
 }
 
-export function playItem(itemId: number): Promise<void> {
-    return invoke<void>("play_item", { itemId });
+/** Resolve an item + its saved progress so the player can load it. */
+export function getItem(itemId: number): Promise<ItemWithProgress> {
+    return invoke<ItemWithProgress>("get_item", { itemId });
 }
 
-export function playItemAt(
+/** Report a playback position tick. Backend persists it, marks completion
+ *  past 90%, and emits `item-progress`. */
+export function reportProgress(
     itemId: number,
-    startSeconds: number,
+    positionSeconds: number,
+    durationSeconds: number,
 ): Promise<void> {
-    return invoke<void>("play_item_at", { itemId, startSeconds });
+    return invoke<void>("report_progress", {
+        itemId,
+        positionSeconds,
+        durationSeconds,
+    });
 }
 
 export function setItemCompleted(
@@ -146,24 +154,6 @@ export async function onNoteSaved(
     return listen<NoteSavedEvent>("note-saved", (event) =>
         handler(event.payload),
     );
-}
-
-// ---- mpv IPC --------------------------------------------------------------
-
-export function mpvGetPosition(): Promise<number | null> {
-    return invoke<number | null>("mpv_get_position");
-}
-
-export function mpvSetPaused(paused: boolean): Promise<void> {
-    return invoke<void>("mpv_set_paused", { paused });
-}
-
-export function mpvSeek(seconds: number): Promise<void> {
-    return invoke<void>("mpv_seek", { seconds });
-}
-
-export function mpvCurrentItemId(): Promise<number | null> {
-    return invoke<number | null>("mpv_current_item_id");
 }
 
 // ---- Obsidian vault -------------------------------------------------------

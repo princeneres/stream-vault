@@ -5,7 +5,8 @@ import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
 import MovieCard from "@/components/MovieCard";
 import ViewControls from "@/components/ViewControls";
-import { getLibraryContents, playItem } from "@/lib/api";
+import { getLibraryContents } from "@/lib/api";
+import { usePlayer } from "@/lib/player";
 import { movieStatus, progressPercent, thumbSrc } from "@/lib/itemDisplay";
 import type { LibraryContents } from "@/lib/types";
 import {
@@ -51,9 +52,8 @@ export default function LibraryView({
     };
   }, [libraryId, progressTick]);
 
-  const handlePlay = useCallback((id: number) => {
-    playItem(id).catch((e) => console.error("playItem failed", e));
-  }, []);
+  const { play } = usePlayer();
+  const handlePlay = useCallback((id: number) => play(id), [play]);
 
   const sortedGroups = useMemo(
     () => applyGroupPrefs(contents?.groups ?? [], prefs),

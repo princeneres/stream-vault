@@ -41,7 +41,6 @@ import {
   countNotesForItems,
   getGroup,
   getNextItem,
-  playItem,
   regenerateLibraryArtwork,
   setGroupCompleted,
   setGroupPoster,
@@ -52,6 +51,7 @@ import {
   progressPercent,
   thumbSrc,
 } from "@/lib/itemDisplay";
+import { usePlayer } from "@/lib/player";
 import type {
   Attachment,
   AttachmentKind,
@@ -426,6 +426,7 @@ export default function DetailView({
   const cacheRef = useRef<TreeCache>(cache);
   const seededRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { play } = usePlayer();
 
   useEffect(() => {
     cacheRef.current = cache;
@@ -531,11 +532,11 @@ export default function DetailView({
   const handlePlayNext = useCallback(async () => {
     try {
       const next = await getNextItem(groupId);
-      if (next) await playItem(next.id);
+      if (next) play(next.id);
     } catch (e) {
       console.error("getNextItem failed", e);
     }
-  }, [groupId]);
+  }, [groupId, play]);
 
   const handleItemToggle = useCallback(
     async (itemId: number, next: boolean) => {
@@ -549,9 +550,10 @@ export default function DetailView({
     [bumpRefresh],
   );
 
-  const handleItemActivate = useCallback((itemId: number) => {
-    playItem(itemId).catch((e) => console.error("playItem failed", e));
-  }, []);
+  const handleItemActivate = useCallback(
+    (itemId: number) => play(itemId),
+    [play],
+  );
 
   const handleGroupToggle = useCallback(
     async (group: Group, next: boolean) => {
@@ -655,14 +657,13 @@ export default function DetailView({
     [loadGroupCached],
   );
 
-  const handlePlayItem = useCallback(async (itemId: number) => {
-    try {
-      await playItem(itemId);
+  const handlePlayItem = useCallback(
+    (itemId: number) => {
+      play(itemId);
       setQuery("");
-    } catch (e) {
-      console.error("playItem failed", e);
-    }
-  }, []);
+    },
+    [play],
+  );
 
   const trimmedQuery = query.trim();
   const searchActive = trimmedQuery.length > 0;

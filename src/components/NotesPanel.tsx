@@ -4,14 +4,8 @@ import Button from "./Button";
 import IconButton from "./IconButton";
 import { useToast } from "./Toast";
 import { cn } from "./cn";
-import {
-  deleteNote,
-  listNotesForItem,
-  mpvCurrentItemId,
-  mpvSeek,
-  playItemAt,
-  updateNote,
-} from "@/lib/api";
+import { deleteNote, listNotesForItem, updateNote } from "@/lib/api";
+import { usePlayer } from "@/lib/player";
 import type { Note } from "@/lib/types";
 
 export interface NotesPanelProps {
@@ -35,6 +29,7 @@ export default function NotesPanel({ itemId, refreshTick }: NotesPanelProps) {
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
   const toast = useToast();
+  const { play, controlsRef } = usePlayer();
 
   useEffect(() => {
     let cancelled = false;
@@ -52,20 +47,15 @@ export default function NotesPanel({ itemId, refreshTick }: NotesPanelProps) {
   }, [itemId, refreshTick]);
 
   const handleSeek = useCallback(
-    async (note: Note) => {
-      try {
-        const current = await mpvCurrentItemId();
-        if (current === note.itemId) {
-          await mpvSeek(note.timestampSec);
-        } else {
-          await playItemAt(note.itemId, note.timestampSec);
-        }
-      } catch (e) {
-        console.error("seek failed", e);
-        toast.push("Could not seek to note", "error");
+    (note: Note) => {
+      const controls = controlsRef.current;
+      if (controls && controls.itemId === note.itemId) {
+        controls.seek(note.timestampSec);
+      } else {
+        play(note.itemId, note.timestampSec);
       }
     },
-    [toast],
+    [play, controlsRef],
   );
 
   const handleEditStart = (note: Note) => {

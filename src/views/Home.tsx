@@ -9,7 +9,8 @@ import GroupCard from "@/components/GroupCard";
 import ItemCard from "@/components/ItemCard";
 import LibrarySection from "@/components/LibrarySection";
 import MovieCard from "@/components/MovieCard";
-import { getContinueWatching, getLibraryContents, playItem } from "@/lib/api";
+import { getContinueWatching, getLibraryContents } from "@/lib/api";
+import { usePlayer } from "@/lib/player";
 import {
   episodeLabel,
   movieStatus,
@@ -103,9 +104,8 @@ export default function Home({
     };
   }, [libraries, progressTick]);
 
-  const handlePlay = useCallback((id: number) => {
-    playItem(id).catch((e) => console.error("playItem failed", e));
-  }, []);
+  const { play } = usePlayer();
+  const handlePlay = useCallback((id: number) => play(id), [play]);
 
   const stats = useMemo(() => {
     let total = 0;

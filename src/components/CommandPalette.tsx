@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layers, Play, Search } from "lucide-react";
-import {
-  convertFileSrc,
-  playItem as playItemApi,
-  search as searchApi,
-} from "@/lib/api";
+import { convertFileSrc, search as searchApi } from "@/lib/api";
+import { usePlayer } from "@/lib/player";
 import type { Group, ItemWithProgress, SearchResults } from "@/lib/types";
 import { cn } from "./cn";
 
@@ -124,15 +121,14 @@ export default function CommandPalette({
   }, [query, open]);
 
   const rows = useMemo(() => flatten(results), [results]);
+  const { play } = usePlayer();
 
   const choose = (row: FlatRow) => {
     pushRecent(query);
     if (row.kind === "group" && row.group) {
       onOpenGroup(row.group.id);
     } else if (row.kind === "item" && row.item) {
-      playItemApi(row.item.id).catch((e) =>
-        console.error("playItem failed", e),
-      );
+      play(row.item.id);
     }
     onClose();
   };

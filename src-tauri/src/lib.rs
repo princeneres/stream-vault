@@ -1,7 +1,6 @@
 pub mod commands;
 pub mod db;
 pub mod models;
-pub mod mpv;
 pub mod scanner;
 pub mod thumbnails;
 pub mod vault;
@@ -48,7 +47,6 @@ pub fn run() {
             }
 
             app.manage(db);
-            app.manage(std::sync::Arc::new(crate::mpv::PlaybackState::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -61,23 +59,19 @@ pub fn run() {
             commands::get_continue_watching,
             commands::get_next_item,
             commands::search,
-            commands::play_item,
+            commands::get_item,
+            commands::report_progress,
             commands::set_item_completed,
             commands::set_group_completed,
             commands::set_group_poster,
             commands::regenerate_library_artwork,
             commands::get_setting,
             commands::set_setting,
-            commands::play_item_at,
             commands::add_note,
             commands::update_note,
             commands::delete_note,
             commands::list_notes_for_item,
             commands::count_notes_for_items,
-            commands::mpv_get_position,
-            commands::mpv_set_paused,
-            commands::mpv_seek,
-            commands::mpv_current_item_id,
             commands::republish_vault,
         ])
         .run(tauri::generate_context!())
