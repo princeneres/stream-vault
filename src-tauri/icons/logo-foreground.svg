@@ -9,5 +9,5 @@
   <path d="M 258.1 121.4 L 284.2 99.2 L 332.8 147.8 L 310.6 173.9 Z" fill="#ffffff"/>
   <circle cx="216" cy="216" r="97.3" fill="none" stroke="#ffffff" stroke-width="29.0"/>
   <circle cx="216" cy="216" r="66.2" fill="none" stroke="#ffffff" stroke-width="9.0"/>
-  <path d="M 198.1 182.2 L 246.4 209.1 a 8.3 8.3 0 0 1 0 13.8 L 198.1 249.8 a 8.3 8.3 0 0 1 -14.5 -7.6 L 183.6 189.8 a 8.3 8.3 0 0 1 14.5 -7.6 Z" fill="#ffffff" stroke="#ffffff" stroke-width="9.7" stroke-linejoin="round"/>
+  <path d="M 205.7 182.2 L 254.0 209.1 a 8.3 8.3 0 0 1 0 13.8 L 205.7 249.8 a 8.3 8.3 0 0 1 -14.5 -7.6 L 191.2 189.8 a 8.3 8.3 0 0 1 14.5 -7.6 Z" fill="#ffffff" stroke="#ffffff" stroke-width="9.7" stroke-linejoin="round"/>
 </svg>
