@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod db;
+pub mod media_server;
 pub mod models;
 pub mod scanner;
 pub mod thumbnails;
@@ -11,7 +12,11 @@ use crate::db::Database;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::try_init().ok();
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    )
+    .try_init()
+    .ok();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -46,7 +51,12 @@ pub fn run() {
                 }
             }
 
+            let media_port = crate::media_server::start(db.clone())
+                .expect("media server binds to a localhost port");
+            log::info!("media server listening on 127.0.0.1:{media_port}");
+
             app.manage(db);
+            app.manage(crate::media_server::MediaServer { port: media_port });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -60,6 +70,7 @@ pub fn run() {
             commands::get_next_item,
             commands::search,
             commands::get_item,
+            commands::media_url,
             commands::report_progress,
             commands::set_item_completed,
             commands::set_group_completed,

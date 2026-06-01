@@ -506,6 +506,24 @@ pub fn get_item(db: State<'_, Database>, item_id: i64) -> CmdResult<ItemWithProg
     Ok(ItemWithProgress { item, progress })
 }
 
+/// Build the localhost HTTP URL the player loads `<video>` from. Routes
+/// playback through the in-process media server (see `media_server.rs`)
+/// because WebKitGTK can't play media off the `asset://` protocol.
+#[tauri::command]
+pub fn media_url(
+    server: State<'_, crate::media_server::MediaServer>,
+    path: String,
+) -> String {
+    // The raw byte-range endpoint: WebKitGTK's GStreamer plays moov-at-end
+    // MP4s fine over seekable HTTP (unlike asset://), so playback is fully
+    // native — seek, playbackRate and pause/resume all work without ffmpeg.
+    format!(
+        "http://127.0.0.1:{}/file?path={}",
+        server.port,
+        urlencoding::encode(&path)
+    )
+}
+
 /// Persist a progress tick from the player. Marks the item `completed` past
 /// 90% of duration (backend owns the completion rule). Emits `item-progress`
 /// so all open views refresh live — same event/shape as before.

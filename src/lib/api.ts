@@ -65,6 +65,13 @@ export function getItem(itemId: number): Promise<ItemWithProgress> {
     return invoke<ItemWithProgress>("get_item", { itemId });
 }
 
+/** Localhost HTTP URL the `<video>` element streams from. Playback is routed
+ *  through the in-process media server because WebKitGTK can't play media off
+ *  the `asset://` protocol. */
+export function mediaUrl(filePath: string): Promise<string> {
+    return invoke<string>("media_url", { path: filePath });
+}
+
 /** Report a playback position tick. Backend persists it, marks completion
  *  past 90%, and emits `item-progress`. */
 export function reportProgress(
