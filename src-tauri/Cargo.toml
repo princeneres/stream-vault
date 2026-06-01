@@ -1,6 +1,6 @@
 [package]
 name = "stream-vault"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local media library desktop app"
 authors = ["Stream Vault Contributors"]
 edition = "2021"
