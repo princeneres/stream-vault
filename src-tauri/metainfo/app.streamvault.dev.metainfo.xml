@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.streamvault.dev</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Stream Vault</name>
+  <summary>Watch your downloaded courses, series and movies with progress tracking</summary>
+
+  <developer id="app.streamvault">
+    <name>Prince</name>
+  </developer>
+
+  <url type="homepage">https://github.com/princeneres/stream-vault</url>
+  <url type="bugtracker">https://github.com/princeneres/stream-vault/issues</url>
+
+  <description>
+    <p>
+      Stream Vault is a local-first desktop app for watching downloaded courses,
+      TV series and movies. It scans your folders into libraries, tracks
+      per-item progress, plays video in a built-in player, and lets you take
+      timestamped notes.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">Stream Vault.desktop</launchable>
+  <icon type="stock">stream-vault</icon>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.4.0" date="2026-06-01">
+      <description>
+        <p>Internal media server, six-theme engine, animation toggle, and new top-bar navigation.</p>
+      </description>
+    </release>
+  </releases>
+</component>

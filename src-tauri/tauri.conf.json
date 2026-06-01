@@ -30,9 +30,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Video",
     "linux": {
       "deb": {
-        "depends": ["ffmpeg"]
+        "depends": ["ffmpeg"],
+        "files": {
+          "/usr/share/metainfo/app.streamvault.dev.metainfo.xml": "metainfo/app.streamvault.dev.metainfo.xml"
+        }
       }
     },
     "macOS": {
