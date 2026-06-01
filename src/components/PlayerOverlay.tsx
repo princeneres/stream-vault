@@ -5,10 +5,14 @@ import {
   useState,
 } from "react";
 import {
+  Keyboard,
   Maximize,
   Minimize,
   Pause,
   Play,
+  RotateCcw,
+  RotateCw,
+  Volume1,
   Volume2,
   VolumeX,
   X,
@@ -27,6 +31,22 @@ import type { ItemWithProgress } from "@/lib/types";
 
 const REPORT_INTERVAL_MS = 3000;
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SKIP_SECONDS = 10;
+const VOLUME_STEP = 0.1;
+
+const SHORTCUTS: Array<{ keys: string; action: string }> = [
+  { keys: "Space / K", action: "Play / pause" },
+  { keys: "← / J", action: "Back 10s" },
+  { keys: "→ / L", action: "Forward 10s" },
+  { keys: "↑ / ↓", action: "Volume up / down" },
+  { keys: "M", action: "Mute / unmute" },
+  { keys: "[ / ]", action: "Speed down / up" },
+  { keys: "0 – 9", action: "Jump to 0%–90%" },
+  { keys: "F", action: "Fullscreen" },
+  { keys: "Alt + N", action: "Capture note" },
+  { keys: "?", action: "Toggle this help" },
+  { keys: "Esc", action: "Close player" },
+];
 
 export interface PlayerRequest {
   itemId: number;
@@ -52,6 +72,24 @@ function formatTime(seconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
+/** Human-readable reason for an HTMLMediaElement error. */
+function mediaErrorMessage(el: HTMLVideoElement): string {
+  const err = el.error;
+  if (!err) return "Unknown playback error.";
+  switch (err.code) {
+    case err.MEDIA_ERR_ABORTED:
+      return "Playback aborted.";
+    case err.MEDIA_ERR_NETWORK:
+      return "Network error while loading the file.";
+    case err.MEDIA_ERR_DECODE:
+      return "Could not decode this file (unsupported codec?). The internal player handles MP4/H.264.";
+    case err.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "This container/codec isn't supported by the internal player. Only MP4/H.264 is supported for now.";
+    default:
+      return err.message || "Unknown playback error.";
+  }
+}
+
 export default function PlayerOverlay({
   request,
   onClose,
@@ -71,10 +109,12 @@ export default function PlayerOverlay({
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [rate, setRate] = useState(1);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const lastReportRef = useRef(0);
 
@@ -111,6 +151,80 @@ export default function PlayerOverlay({
     );
   }, [current.itemId]);
 
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) v.play().catch((e) => console.error("play() failed", e));
+    else v.pause();
+  }, []);
+
+  const seekBy = useCallback((delta: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const t = Math.max(0, Math.min(v.duration || 0, v.currentTime + delta));
+    v.currentTime = t;
+    setPosition(t);
+  }, []);
+
+  const seekToFraction = useCallback((frac: number) => {
+    const v = videoRef.current;
+    if (!v || !Number.isFinite(v.duration)) return;
+    const t = v.duration * frac;
+    v.currentTime = t;
+    setPosition(t);
+  }, []);
+
+  const changeVolume = useCallback((delta: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const next = Math.max(0, Math.min(1, v.volume + delta));
+    v.volume = next;
+    v.muted = next === 0;
+    setVolume(next);
+    setMuted(v.muted);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+  }, []);
+
+  const setPlaybackRate = useCallback((next: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.playbackRate = next;
+    setRate(next);
+  }, []);
+
+  const cycleRate = useCallback(() => {
+    const idx = PLAYBACK_RATES.indexOf(rate);
+    setPlaybackRate(PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length]);
+  }, [rate, setPlaybackRate]);
+
+  const stepRate = useCallback(
+    (dir: 1 | -1) => {
+      const idx = PLAYBACK_RATES.indexOf(rate);
+      const next = Math.max(
+        0,
+        Math.min(PLAYBACK_RATES.length - 1, idx + dir),
+      );
+      setPlaybackRate(PLAYBACK_RATES[next]);
+    },
+    [rate, setPlaybackRate],
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      el.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
   // Register imperative controls for app-level note capture.
   useEffect(() => {
     registerControls({
@@ -146,11 +260,19 @@ export default function PlayerOverlay({
     const v = videoRef.current;
     if (!v) return;
     setDuration(v.duration);
+    setVolume(v.volume);
     if (resumeSeconds > 0 && resumeSeconds < v.duration) {
       v.currentTime = resumeSeconds;
     }
     v.playbackRate = rate;
-    v.play().catch(() => {});
+    // Autoplay may be rejected by the webview's autoplay policy. Retry muted
+    // (always allowed) so playback starts; the user can unmute from controls.
+    v.play().catch((err) => {
+      console.warn("autoplay blocked, retrying muted", err);
+      v.muted = true;
+      setMuted(true);
+      v.play().catch((e) => console.error("muted autoplay also failed", e));
+    });
   }, [resumeSeconds, rate]);
 
   const handleTimeUpdate = useCallback(() => {
@@ -163,6 +285,13 @@ export default function PlayerOverlay({
       flushProgress();
     }
   }, [flushProgress]);
+
+  const handleError = useCallback(() => {
+    const v = videoRef.current;
+    const msg = v ? mediaErrorMessage(v) : "Unknown playback error.";
+    console.error("video error:", msg, v?.error, "src:", v?.currentSrc);
+    setError(msg);
+  }, []);
 
   const handleEnded = useCallback(async () => {
     flushProgress();
@@ -179,13 +308,6 @@ export default function PlayerOverlay({
     }
   }, [flushProgress, item, current.itemId]);
 
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
-  }, []);
-
   const handleScrub = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = videoRef.current;
     if (!v) return;
@@ -194,57 +316,96 @@ export default function PlayerOverlay({
     setPosition(t);
   }, []);
 
-  const toggleMute = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  }, []);
-
-  const cycleRate = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const idx = PLAYBACK_RATES.indexOf(rate);
-    const next = PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
-    v.playbackRate = next;
-    setRate(next);
-  }, [rate]);
-
-  const toggleFullscreen = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else {
-      el.requestFullscreen().catch(() => {});
-    }
-  }, []);
-
   const handleClose = useCallback(() => {
     flushProgress();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     onClose();
   }, [flushProgress, onClose]);
 
-  // Esc closes the player (capture so it runs before the global handler).
+  // Keyboard shortcuts (capture phase so they run before the global handler).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.fullscreenElement) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleClose();
-      } else if (e.key === " " || e.key === "k") {
-        const target = e.target as HTMLElement | null;
-        if (target && target.tagName === "INPUT") return;
-        e.preventDefault();
-        togglePlay();
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
       }
+      // Leave modifier combos (Alt+N note capture, Ctrl+K, …) to the app.
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+      switch (e.key) {
+        case "Escape":
+          if (showHelp) {
+            setShowHelp(false);
+          } else if (!document.fullscreenElement) {
+            handleClose();
+          } else {
+            return; // let the browser exit fullscreen
+          }
+          break;
+        case " ":
+        case "k":
+          togglePlay();
+          break;
+        case "ArrowLeft":
+        case "j":
+          seekBy(-SKIP_SECONDS);
+          break;
+        case "ArrowRight":
+        case "l":
+          seekBy(SKIP_SECONDS);
+          break;
+        case "ArrowUp":
+          changeVolume(VOLUME_STEP);
+          break;
+        case "ArrowDown":
+          changeVolume(-VOLUME_STEP);
+          break;
+        case "m":
+          toggleMute();
+          break;
+        case "f":
+          toggleFullscreen();
+          break;
+        case "[":
+          stepRate(-1);
+          break;
+        case "]":
+          stepRate(1);
+          break;
+        case "?":
+          setShowHelp((s) => !s);
+          break;
+        default:
+          if (e.key >= "0" && e.key <= "9") {
+            seekToFraction(Number(e.key) / 10);
+            break;
+          }
+          return; // unhandled — don't preventDefault
+      }
+      e.preventDefault();
+      e.stopPropagation();
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [handleClose, togglePlay]);
+  }, [
+    showHelp,
+    handleClose,
+    togglePlay,
+    seekBy,
+    seekToFraction,
+    changeVolume,
+    toggleMute,
+    toggleFullscreen,
+    stepRate,
+  ]);
 
   const src = item ? convertFileSrc(item.filePath) : undefined;
+  const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
   return (
     <div
@@ -267,9 +428,19 @@ export default function PlayerOverlay({
             key={current.itemId}
             ref={videoRef}
             src={src}
+            playsInline
+            preload="auto"
             className="h-full w-full"
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={handleTimeUpdate}
+            onError={handleError}
+            onVolumeChange={() => {
+              const v = videoRef.current;
+              if (v) {
+                setVolume(v.volume);
+                setMuted(v.muted);
+              }
+            }}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={handleEnded}
@@ -279,13 +450,49 @@ export default function PlayerOverlay({
           <div className="text-sm text-(--color-text-muted)">Loading…</div>
         )}
 
-        <div className="absolute right-3 top-3">
+        <div className="absolute right-3 top-3 flex items-center gap-2">
+          <IconButton
+            icon={<Keyboard size={18} />}
+            tooltip="Keyboard shortcuts (?)"
+            onClick={() => setShowHelp((s) => !s)}
+          />
           <IconButton
             icon={<X size={18} />}
             tooltip="Close (Esc)"
             onClick={handleClose}
           />
         </div>
+
+        {showHelp ? (
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/60"
+            onClick={() => setShowHelp(false)}
+          >
+            <div
+              className="w-80 rounded-(--radius-card-lg) border border-(--color-border-subtle) bg-(--color-surface) p-5 shadow-(--shadow-card)"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="mb-3 text-sm font-semibold text-(--color-text-primary)">
+                Keyboard shortcuts
+              </h2>
+              <dl className="space-y-1.5">
+                {SHORTCUTS.map((s) => (
+                  <div
+                    key={s.keys}
+                    className="flex items-center justify-between gap-4 text-xs"
+                  >
+                    <dt className="text-(--color-text-secondary)">{s.action}</dt>
+                    <dd>
+                      <kbd className="rounded-(--radius-control) border border-(--color-border-subtle) bg-(--color-surface-raised) px-1.5 py-0.5 font-mono text-[11px] text-(--color-text-primary)">
+                        {s.keys}
+                      </kbd>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2 bg-(--color-surface)/95 px-4 py-3 backdrop-blur">
@@ -304,21 +511,31 @@ export default function PlayerOverlay({
           aria-label="Seek"
           className="w-full accent-(--color-accent)"
         />
-        <div className="flex items-center gap-3 text-(--color-text-secondary)">
+        <div className="flex items-center gap-2 text-(--color-text-secondary)">
           <IconButton
             icon={playing ? <Pause size={18} /> : <Play size={18} />}
             tooltip={playing ? "Pause (Space)" : "Play (Space)"}
             onClick={togglePlay}
           />
           <IconButton
-            icon={muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            tooltip={muted ? "Unmute" : "Mute"}
+            icon={<RotateCcw size={18} />}
+            tooltip="Back 10s (←)"
+            onClick={() => seekBy(-SKIP_SECONDS)}
+          />
+          <IconButton
+            icon={<RotateCw size={18} />}
+            tooltip="Forward 10s (→)"
+            onClick={() => seekBy(SKIP_SECONDS)}
+          />
+          <IconButton
+            icon={<VolumeIcon size={18} />}
+            tooltip={muted ? "Unmute (M)" : "Mute (M)"}
             onClick={toggleMute}
           />
           <span className="tabular-nums text-xs text-(--color-text-muted)">
             {formatTime(position)} / {formatTime(duration)}
           </span>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
               onClick={cycleRate}
@@ -326,13 +543,14 @@ export default function PlayerOverlay({
                 "rounded-(--radius-control) px-2 py-1 text-xs font-medium tabular-nums",
                 "text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)",
               )}
-              aria-label="Playback speed"
+              aria-label="Playback speed ([ and ])"
+              title="Playback speed ([ and ])"
             >
               {rate}×
             </button>
             <IconButton
               icon={isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-              tooltip="Fullscreen"
+              tooltip="Fullscreen (F)"
               onClick={toggleFullscreen}
             />
           </div>
