@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { Play, StickyNote } from "lucide-react";
 import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
@@ -16,6 +16,7 @@ export interface ItemCardProps {
   onActivate?: (id: number) => void;
   onPlay?: (id: number) => void;
   className?: string;
+  style?: CSSProperties;
 }
 
 const CV_STYLE = {
@@ -35,6 +36,7 @@ function ItemCardImpl({
   onActivate,
   onPlay,
   className,
+  style,
 }: ItemCardProps) {
   const interactive = Boolean(onActivate);
   const Wrapper = interactive ? "button" : "div";
@@ -42,7 +44,7 @@ function ItemCardImpl({
     <Wrapper
       type={interactive ? "button" : undefined}
       onClick={onActivate ? () => onActivate(id) : undefined}
-      style={CV_STYLE}
+      style={{ ...CV_STYLE, ...style }}
       className={cn(
         "group relative flex w-56 shrink-0 flex-col gap-2 text-left",
         interactive &&
@@ -50,7 +52,7 @@ function ItemCardImpl({
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) ring-1 ring-transparent motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) motion-safe:group-hover:ring-(--color-accent-soft) hover:[will-change:transform]">
         {thumbnail ? (
           <img
             src={thumbnail}
@@ -71,7 +73,7 @@ function ItemCardImpl({
             aria-hidden
             className="pointer-events-none absolute inset-0 flex items-center justify-center bg-(--color-bg)/30 opacity-0 motion-safe:transition-opacity group-hover:opacity-100"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
+            <span className="glow-accent flex h-12 w-12 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
               <Play size={20} fill="currentColor" />
             </span>
           </span>

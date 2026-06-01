@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { Check, CircleDashed, Film, PlayCircle } from "lucide-react";
 import { cn } from "./cn";
 import ProgressBar from "./ProgressBar";
@@ -19,6 +19,7 @@ export interface MovieCardProps {
   durationLabel?: string;
   onActivate?: (id: number) => void;
   className?: string;
+  style?: CSSProperties;
 }
 
 const statusBadge: Record<
@@ -47,6 +48,7 @@ function MovieCardImpl({
   durationLabel,
   onActivate,
   className,
+  style,
 }: MovieCardProps) {
   const badge = statusBadge[status];
   const Icon = badge.icon;
@@ -54,7 +56,7 @@ function MovieCardImpl({
     <button
       type="button"
       onClick={onActivate ? () => onActivate(id) : undefined}
-      style={CV_STYLE}
+      style={{ ...CV_STYLE, ...style }}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
@@ -62,7 +64,7 @@ function MovieCardImpl({
         className,
       )}
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) ring-1 ring-transparent motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) motion-safe:group-hover:ring-(--color-accent-soft) hover:[will-change:transform]">
         {poster ? (
           <img
             src={poster}
@@ -82,7 +84,7 @@ function MovieCardImpl({
           aria-hidden
           className="pointer-events-none absolute inset-0 flex items-center justify-center bg-(--color-bg)/30 opacity-0 motion-safe:transition-opacity group-hover:opacity-100"
         >
-          <span className="flex h-14 w-14 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
+          <span className="glow-accent flex h-14 w-14 items-center justify-center rounded-(--radius-pill) bg-(--color-accent) text-(--color-text-inverse) shadow-(--shadow-card-hover)">
             <PlayCircle size={24} fill="currentColor" strokeWidth={1} />
           </span>
         </span>

@@ -37,12 +37,12 @@ function Sidebar({
     <aside
       aria-label="Primary"
       className={cn(
-        "flex h-full w-60 shrink-0 flex-col gap-2 border-r border-(--color-border-subtle) bg-(--color-surface) px-3 py-4",
+        "flex h-full w-(--layout-sidebar) shrink-0 flex-col gap-2 border-r border-(--color-border-subtle) bg-(--color-surface) px-3 py-4",
         className,
       )}
     >
       <div className="px-2 pb-2">
-        <h1 className="text-base font-semibold tracking-tight text-(--color-text-primary)">
+        <h1 className="font-display text-lg font-bold tracking-tight text-(--color-text-primary)">
           Stream Vault
         </h1>
       </div>
@@ -76,11 +76,12 @@ function Sidebar({
               type="button"
               onClick={() => onSelect(item.id)}
               className={cn(
-                "flex h-9 items-center gap-2.5 rounded-(--radius-control) px-3 text-sm transition-colors",
+                "relative flex h-9 items-center gap-2.5 rounded-(--radius-control) px-3 text-sm transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
+                "before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-(--radius-pill) before:bg-(--color-accent) before:transition-opacity before:content-['']",
                 active
-                  ? "bg-(--color-accent-soft) text-(--color-text-primary)"
-                  : "text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)",
+                  ? "bg-(--color-accent-soft) text-(--color-text-primary) before:opacity-100"
+                  : "text-(--color-text-secondary) before:opacity-0 hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)",
               )}
             >
               <span className="flex shrink-0 text-(--color-text-secondary)">

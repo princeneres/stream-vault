@@ -142,7 +142,7 @@ export default function Home({
 
   return (
     <div className="space-y-10 px-8 py-6">
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <section className="stagger grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           icon={<LibraryIcon size={16} aria-hidden />}
           label="Libraries"

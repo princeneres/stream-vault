@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Layers, Play, Search } from "lucide-react";
+import {
+  ChevronRight,
+  Layers,
+  Palette,
+  Play,
+  Search,
+  Zap,
+} from "lucide-react";
 import { convertFileSrc, search as searchApi } from "@/lib/api";
+import { type Command, matchCommands } from "@/lib/commands";
 import { usePlayer } from "@/lib/player";
 import type { Group, ItemWithProgress, SearchResults } from "@/lib/types";
 import { cn } from "./cn";
+
+const EMPTY_COMMAND_LIMIT = 6;
 
 const RECENT_KEY = "streamvault:recent-searches";
 const RECENT_MAX = 5;
@@ -39,13 +49,15 @@ export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onOpenGroup: (id: number) => void;
+  commands: Command[];
 }
 
 interface FlatRow {
   key: string;
-  kind: "group" | "item";
+  kind: "group" | "item" | "command";
   group?: Group;
   item?: ItemWithProgress;
+  command?: Command;
 }
 
 function flatten(results: SearchResults | null): FlatRow[] {
@@ -64,6 +76,7 @@ export default function CommandPalette({
   open,
   onClose,
   onOpenGroup,
+  commands,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -90,6 +103,11 @@ export default function CommandPalette({
     const trigger = document.activeElement as HTMLElement | null;
     return () => trigger?.focus?.();
   }, [open]);
+
+  // Keep the highlight on the first row as the query (and thus rows) changes.
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,10 +138,23 @@ export default function CommandPalette({
     };
   }, [query, open]);
 
-  const rows = useMemo(() => flatten(results), [results]);
+  const commandRows = useMemo<FlatRow[]>(() => {
+    const matched = matchCommands(query, commands);
+    const limited = query.trim() ? matched : matched.slice(0, EMPTY_COMMAND_LIMIT);
+    return limited.map((c) => ({ key: `c:${c.id}`, kind: "command", command: c }));
+  }, [query, commands]);
+
+  const rows = useMemo(
+    () => [...commandRows, ...flatten(results)],
+    [commandRows, results],
+  );
   const { play } = usePlayer();
 
   const choose = (row: FlatRow) => {
+    if (row.kind === "command" && row.command) {
+      row.command.run(); // commands close the palette themselves
+      return;
+    }
     pushRecent(query);
     if (row.kind === "group" && row.group) {
       onOpenGroup(row.group.id);
@@ -219,45 +250,45 @@ export default function CommandPalette({
           role="listbox"
           aria-label="Search results"
         >
-          {!query.trim() ? (
-            recent.length > 0 ? (
-              <div>
-                <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-(--color-text-muted)">
-                  Recent
-                </p>
-                {recent.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setQuery(q)}
-                    className="flex w-full items-center gap-2 rounded-(--radius-control) px-3 py-2 text-left text-sm text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)"
-                  >
-                    <Search size={14} aria-hidden />
-                    <span className="truncate">{q}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
-                Start typing to search.
+          {!query.trim() && recent.length > 0 ? (
+            <div>
+              <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-(--color-text-muted)">
+                Recent
               </p>
-            )
-          ) : loading && rows.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
-              Searching…
-            </p>
-          ) : rows.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
-              No results.
-            </p>
-          ) : (
+              {recent.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setQuery(q)}
+                  className="flex w-full items-center gap-2 rounded-(--radius-control) px-3 py-2 text-left text-sm text-(--color-text-secondary) hover:bg-(--color-surface-raised) hover:text-(--color-text-primary)"
+                >
+                  <Search size={14} aria-hidden />
+                  <span className="truncate">{q}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {rows.length > 0 ? (
             <ResultsList
               rows={rows}
               activeIndex={activeIndex}
               onChoose={choose}
               onHover={setActiveIndex}
             />
-          )}
+          ) : query.trim() && loading ? (
+            <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
+              Searching…
+            </p>
+          ) : query.trim() ? (
+            <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
+              No results.
+            </p>
+          ) : recent.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-(--color-text-muted)">
+              Start typing to search, or pick a command.
+            </p>
+          ) : null}
         </div>
       </div>
     </div>,
@@ -276,11 +307,22 @@ function ResultsList({
   onChoose: (row: FlatRow) => void;
   onHover: (idx: number) => void;
 }) {
+  const commandRows = rows.filter((r) => r.kind === "command");
   const groups = rows.filter((r) => r.kind === "group");
   const items = rows.filter((r) => r.kind === "item");
 
   return (
     <div className="space-y-2">
+      {commandRows.length > 0 ? (
+        <Section
+          label="Commands"
+          rows={commandRows}
+          rowsAll={rows}
+          activeIndex={activeIndex}
+          onChoose={onChoose}
+          onHover={onHover}
+        />
+      ) : null}
       {groups.length > 0 ? (
         <Section
           label="Groups"
@@ -346,10 +388,18 @@ function Section({
             <Thumbnail row={row} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">
-                {row.kind === "group" ? row.group?.title : row.item?.title}
+                {row.kind === "command"
+                  ? row.command?.title
+                  : row.kind === "group"
+                    ? row.group?.title
+                    : row.item?.title}
               </p>
               <p className="truncate text-xs text-(--color-text-muted)">
-                {row.kind === "group" ? "Group" : "Item"}
+                {row.kind === "command"
+                  ? row.command?.group
+                  : row.kind === "group"
+                    ? "Group"
+                    : "Item"}
               </p>
             </div>
           </button>
@@ -360,6 +410,20 @@ function Section({
 }
 
 function Thumbnail({ row }: { row: FlatRow }) {
+  if (row.kind === "command") {
+    const cmd = row.command;
+    const Icon =
+      cmd?.group === "Theme"
+        ? Palette
+        : cmd?.group === "Actions"
+          ? Zap
+          : ChevronRight;
+    return (
+      <span className="flex h-8 w-12 shrink-0 items-center justify-center rounded bg-(--color-surface-raised) text-(--color-text-secondary)">
+        <Icon size={14} aria-hidden />
+      </span>
+    );
+  }
   const path =
     row.kind === "group"
       ? row.group?.posterPath

@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import type { Group, ItemWithProgress } from "./types";
 
 export type SortKey = "default" | "name" | "recent" | "progress";
@@ -29,6 +30,56 @@ export const FILTER_OPTIONS = Object.entries(FILTER_LABELS) as [
   FilterKey,
   string,
 ][];
+
+const PREFS_PREFIX = "streamvault:view-prefs:";
+
+function loadPrefs(scope: string): ViewPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_PREFIX + scope);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<ViewPrefs>;
+      return {
+        sort: p.sort && p.sort in SORT_LABELS ? p.sort : DEFAULT_PREFS.sort,
+        filter:
+          p.filter && p.filter in FILTER_LABELS
+            ? p.filter
+            : DEFAULT_PREFS.filter,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_PREFS;
+}
+
+/**
+ * Per-scope view preferences persisted to localStorage. `scope` is a stable
+ * key like `lib:3` or `grp:42`; prefs reload when the scope changes so each
+ * library/group remembers its own sort & filter across navigation and reload.
+ */
+export function useViewPrefs(
+  scope: string,
+): [ViewPrefs, (next: ViewPrefs) => void] {
+  const [prefs, setPrefs] = useState<ViewPrefs>(() => loadPrefs(scope));
+
+  useEffect(() => {
+    setPrefs(loadPrefs(scope));
+  }, [scope]);
+
+  const update = useCallback(
+    (next: ViewPrefs) => {
+      setPrefs(next);
+      try {
+        localStorage.setItem(PREFS_PREFIX + scope, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+    },
+    [scope],
+  );
+
+  return [prefs, update];
+}
 
 function itemProgressPct(item: ItemWithProgress): number {
   if (!item.progress || !item.durationSeconds || item.durationSeconds <= 0) {

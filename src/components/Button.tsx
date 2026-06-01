@@ -14,7 +14,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClass: Record<Variant, string> = {
   primary:
-    "bg-(--color-accent) text-(--color-text-inverse) hover:bg-(--color-accent-hover) active:bg-(--color-accent-active)",
+    "glow-accent bg-(--color-accent) text-(--color-text-inverse) hover:bg-(--color-accent-hover) active:bg-(--color-accent-active)",
   secondary:
     "bg-(--color-surface-raised) text-(--color-text-primary) hover:bg-(--color-surface-hover) border border-(--color-border-subtle)",
   ghost:

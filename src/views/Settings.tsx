@@ -16,6 +16,7 @@ import Input from "@/components/Input";
 import KindIcon from "@/components/KindIcon";
 import Modal from "@/components/Modal";
 import Select from "@/components/Select";
+import ThemePicker from "@/components/ThemePicker";
 import { useToast } from "@/components/Toast";
 import {
   addLibrary,
@@ -26,7 +27,13 @@ import {
   scanLibrary,
   setSetting,
 } from "@/lib/api";
-import { applyTheme, getStoredTheme, THEMES, type Theme } from "@/lib/theme";
+import {
+  applyMotion,
+  applyTheme,
+  getStoredMotion,
+  getStoredTheme,
+  type Theme,
+} from "@/lib/theme";
 import type { Library, LibraryKind, ScanResult } from "@/lib/types";
 
 const KIND_OPTIONS: { value: LibraryKind; label: string }[] = [
@@ -44,6 +51,7 @@ export interface SettingsProps {
 export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
+  const [motionOn, setMotionOn] = useState(getStoredMotion);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [vaultPath, setVaultPath] = useState("");
   const [vaultSubfolder, setVaultSubfolder] = useState("");
@@ -192,7 +200,7 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
   return (
     <div className="space-y-10 px-8 py-6">
       <header>
-        <h1 className="text-2xl font-semibold text-(--color-text-primary)">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-(--color-text-primary)">
           Settings
         </h1>
       </header>
@@ -268,28 +276,61 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-base font-semibold text-(--color-text-primary)">
+        <h2 className="font-display text-base font-semibold text-(--color-text-primary)">
           Appearance
         </h2>
-        <div className="flex items-center justify-between gap-4 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
-          <div className="space-y-0.5">
-            <p className="text-sm font-medium text-(--color-text-primary)">
-              Theme
-            </p>
-            <p className="text-xs text-(--color-text-secondary)">
-              Switches the entire UI palette. Saved locally on this device.
-            </p>
-          </div>
-          <Select
-            aria-label="Theme"
+        <div className="space-y-1.5 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+          <p className="text-sm font-medium text-(--color-text-primary)">Theme</p>
+          <p className="pb-1 text-xs text-(--color-text-secondary)">
+            Switches the entire UI palette. Saved locally on this device.
+          </p>
+          <ThemePicker
             value={theme}
-            options={THEMES}
-            onChange={(e) => {
-              const next = e.currentTarget.value as Theme;
+            onChange={(next) => {
               setTheme(next);
               applyTheme(next);
             }}
           />
+        </div>
+        <div className="flex items-center justify-between gap-4 rounded-(--radius-card) border border-(--color-border-subtle) bg-(--color-surface) px-4 py-3">
+          <div className="space-y-0.5">
+            <p
+              id="motion-label"
+              className="text-sm font-medium text-(--color-text-primary)"
+            >
+              Animations
+            </p>
+            <p
+              id="motion-desc"
+              className="text-xs text-(--color-text-secondary)"
+            >
+              Turn off all motion and transitions, regardless of system settings.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={motionOn}
+            aria-labelledby="motion-label"
+            aria-describedby="motion-desc"
+            onClick={() => {
+              const next = !motionOn;
+              setMotionOn(next);
+              applyMotion(next);
+            }}
+            className={
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-(--radius-pill) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) focus-visible:ring-offset-2 focus-visible:ring-offset-(--color-bg) " +
+              (motionOn ? "bg-(--color-accent)" : "bg-(--color-surface-hover)")
+            }
+          >
+            <span
+              aria-hidden
+              className={
+                "inline-block h-3.5 w-3.5 transform rounded-(--radius-pill) bg-(--color-text-primary) transition-transform " +
+                (motionOn ? "translate-x-5" : "translate-x-1")
+              }
+            />
+          </button>
         </div>
       </section>
 

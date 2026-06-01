@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
+/* Distinctive display face, bundled for offline use (Tauri ships no CDN). */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("./assets/fonts/bricolage.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+}
+
 @theme {
+  /* Typography */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
   /* Notion-inspired dark palette */
   --color-bg: #191919;
   --color-surface: #202020;
@@ -31,6 +43,9 @@
   --color-danger: #e03e3e;
   --color-danger-hover: #eb5757;
   --color-danger-soft: rgba(224, 62, 62, 0.16);
+
+  /* Accent glow — neon themes override; transparent = inert on clean themes */
+  --color-glow: transparent;
 
   /* Radii */
   --radius-pill: 9999px;
@@ -96,6 +111,25 @@
   animation: toast-out var(--duration-fast) var(--ease-standard) both;
 }
 
+/* Staggered list/grid entrance. Children opt in via inline `--i` (capped). */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stagger > * {
+  animation: stagger-in var(--duration-base) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* Accent glow on hover/focus. Inert on clean themes (glow is transparent). */
+.glow-accent {
+  transition: box-shadow var(--duration-base) var(--ease-out);
+}
+.glow-accent:hover,
+.glow-accent:focus-visible {
+  box-shadow: 0 0 22px -4px var(--color-glow);
+}
+
 html {
   color-scheme: dark;
 }
@@ -135,35 +169,138 @@ html {
   --shadow-modal: 0 24px 60px -12px rgba(15, 15, 15, 0.25), 0 8px 20px -6px rgba(15, 15, 15, 0.18);
 }
 
-/* Theme: Purple -------------------------------------------------------- */
-:root[data-theme="purple"] {
+/* Theme: Synthwave ----------------------------------------------------- */
+:root[data-theme="synthwave"] {
   color-scheme: dark;
 
-  --color-bg: #1a1426;
-  --color-surface: #221a32;
-  --color-surface-raised: #2c2240;
-  --color-surface-hover: #362b4d;
-  --color-overlay: rgba(10, 6, 18, 0.7);
+  --color-bg: #160e29;
+  --color-surface: #1d1338;
+  --color-surface-raised: #271a47;
+  --color-surface-hover: #322057;
+  --color-overlay: rgba(8, 4, 20, 0.72);
 
-  --color-border-subtle: #342a49;
-  --color-border-strong: #4d3f6a;
+  --color-border-subtle: #312152;
+  --color-border-strong: #4a3275;
 
-  --color-text-primary: #f4ecfb;
-  --color-text-secondary: #c5b3d8;
-  --color-text-muted: #8e7da3;
-  --color-text-inverse: #1a1426;
+  --color-text-primary: #fdf4ff;
+  --color-text-secondary: #d6b8f5;
+  --color-text-muted: #9a7fc4;
+  --color-text-inverse: #160e29;
 
-  --color-accent: #b56cf9;
-  --color-accent-hover: #c486ff;
-  --color-accent-active: #a253ee;
-  --color-accent-soft: rgba(181, 108, 249, 0.18);
+  --color-accent: #ff2fb9;
+  --color-accent-hover: #ff57c8;
+  --color-accent-active: #e0179f;
+  --color-accent-soft: rgba(255, 47, 185, 0.18);
 
-  --color-success: #6dcab1;
-  --color-success-soft: rgba(109, 202, 177, 0.18);
-  --color-warning: #ebbf2a;
-  --color-danger: #e85a6c;
-  --color-danger-hover: #f06f7f;
-  --color-danger-soft: rgba(232, 90, 108, 0.18);
+  --color-success: #2cf5c4;
+  --color-success-soft: rgba(44, 245, 196, 0.16);
+  --color-warning: #ffd23f;
+  --color-danger: #ff5470;
+  --color-danger-hover: #ff7088;
+  --color-danger-soft: rgba(255, 84, 112, 0.18);
+
+  --color-glow: rgba(255, 47, 185, 0.55);
+  --shadow-card-hover: 0 12px 28px -8px rgba(255, 47, 185, 0.3), 0 4px 12px -4px rgba(0, 0, 0, 0.6);
+}
+
+/* Theme: Dracula ------------------------------------------------------- */
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+
+  --color-bg: #282a36;
+  --color-surface: #2f313f;
+  --color-surface-raised: #383a4a;
+  --color-surface-hover: #424458;
+  --color-overlay: rgba(20, 21, 28, 0.72);
+
+  --color-border-subtle: #3a3c4e;
+  --color-border-strong: #565872;
+
+  --color-text-primary: #f8f8f2;
+  --color-text-secondary: #c7c9dd;
+  --color-text-muted: #8b8da3;
+  --color-text-inverse: #282a36;
+
+  --color-accent: #bd93f9;
+  --color-accent-hover: #cba9ff;
+  --color-accent-active: #a679f0;
+  --color-accent-soft: rgba(189, 147, 249, 0.18);
+
+  --color-success: #50fa7b;
+  --color-success-soft: rgba(80, 250, 123, 0.16);
+  --color-warning: #f1fa8c;
+  --color-danger: #ff5555;
+  --color-danger-hover: #ff6e6e;
+  --color-danger-soft: rgba(255, 85, 85, 0.18);
+
+  --color-glow: rgba(189, 147, 249, 0.45);
+  --shadow-card-hover: 0 12px 28px -8px rgba(189, 147, 249, 0.28), 0 4px 12px -4px rgba(0, 0, 0, 0.55);
+}
+
+/* Theme: Emerald ------------------------------------------------------- */
+:root[data-theme="emerald"] {
+  color-scheme: light;
+
+  --color-bg: #f4faf6;
+  --color-surface: #ffffff;
+  --color-surface-raised: #eef6f0;
+  --color-surface-hover: #e3efe7;
+  --color-overlay: rgba(8, 30, 20, 0.4);
+
+  --color-border-subtle: #d8e8de;
+  --color-border-strong: #bcd6c6;
+
+  --color-text-primary: #0f2419;
+  --color-text-secondary: #335644;
+  --color-text-muted: #6d8a7c;
+  --color-text-inverse: #ffffff;
+
+  --color-accent: #0f9d63;
+  --color-accent-hover: #0c8a57;
+  --color-accent-active: #0a7449;
+  --color-accent-soft: rgba(15, 157, 99, 0.12);
+
+  --color-success: #0f9d63;
+  --color-success-soft: rgba(15, 157, 99, 0.12);
+  --color-warning: #c08a04;
+  --color-danger: #c93030;
+  --color-danger-hover: #b82828;
+  --color-danger-soft: rgba(201, 48, 48, 0.12);
+
+  --shadow-card: 0 1px 2px rgba(15, 36, 25, 0.06);
+  --shadow-card-hover: 0 12px 28px -8px rgba(15, 36, 25, 0.16), 0 4px 12px -4px rgba(15, 36, 25, 0.1);
+  --shadow-modal: 0 24px 60px -12px rgba(15, 36, 25, 0.22), 0 8px 20px -6px rgba(15, 36, 25, 0.16);
+}
+
+/* Theme: Nord ---------------------------------------------------------- */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+
+  --color-bg: #2e3440;
+  --color-surface: #353c4a;
+  --color-surface-raised: #3b4252;
+  --color-surface-hover: #434c5e;
+  --color-overlay: rgba(20, 24, 32, 0.7);
+
+  --color-border-subtle: #3b4252;
+  --color-border-strong: #4c566a;
+
+  --color-text-primary: #eceff4;
+  --color-text-secondary: #d8dee9;
+  --color-text-muted: #9aa4b8;
+  --color-text-inverse: #2e3440;
+
+  --color-accent: #88c0d0;
+  --color-accent-hover: #9ed0de;
+  --color-accent-active: #6ba9bb;
+  --color-accent-soft: rgba(136, 192, 208, 0.16);
+
+  --color-success: #a3be8c;
+  --color-success-soft: rgba(163, 190, 140, 0.16);
+  --color-warning: #ebcb8b;
+  --color-danger: #bf616a;
+  --color-danger-hover: #cf737c;
+  --color-danger-soft: rgba(191, 97, 106, 0.18);
 }
 
 html, body, #root {
@@ -172,11 +309,34 @@ html, body, #root {
 
 body {
   margin: 0;
-  background: var(--color-bg);
   color: var(--color-text-primary);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Per-theme depth: a soft accent wash + a glow blob (neon themes only). */
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(120% 85% at 100% 0%, var(--color-accent-soft) 0%, transparent 45%),
+    radial-gradient(100% 75% at 0% 100%, var(--color-glow) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Fixed grain overlay — painted once, never repaints on scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("./assets/textures/noise.png");
+  background-repeat: repeat;
+  background-size: 128px 128px;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -188,6 +348,17 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Manual "disable animations" toggle — mirrors the reduced-motion media query.
+   The !important duration collapse also neutralizes motion-safe: utilities. */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 

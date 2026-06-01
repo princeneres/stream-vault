@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { Layers } from "lucide-react";
 import type { LibraryKind } from "@/lib/types";
 import KindIcon from "./KindIcon";
@@ -19,6 +19,7 @@ export interface GroupCardProps {
   nextEpisode?: string;
   onActivate?: (id: number) => void;
   className?: string;
+  style?: CSSProperties;
 }
 
 function metadata(props: GroupCardProps): string | null {
@@ -38,13 +39,13 @@ function metadata(props: GroupCardProps): string | null {
 }
 
 function GroupCardImpl(props: GroupCardProps) {
-  const { id, title, poster, kind, onActivate, className } = props;
+  const { id, title, poster, kind, onActivate, className, style } = props;
   const meta = metadata(props);
   return (
     <button
       type="button"
       onClick={onActivate ? () => onActivate(id) : undefined}
-      style={CV_STYLE}
+      style={{ ...CV_STYLE, ...style }}
       className={cn(
         "group relative flex w-full flex-col gap-2 text-left",
         "rounded-(--radius-card) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)",
@@ -52,7 +53,7 @@ function GroupCardImpl(props: GroupCardProps) {
         className,
       )}
     >
-      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) hover:[will-change:transform]">
+      <div className="relative aspect-video overflow-hidden rounded-(--radius-card) bg-(--color-surface-raised) shadow-(--shadow-card) ring-1 ring-transparent motion-safe:transition-all motion-safe:duration-200 motion-safe:group-hover:-translate-y-1 motion-safe:group-hover:shadow-(--shadow-card-hover) motion-safe:group-hover:ring-(--color-accent-soft) hover:[will-change:transform]">
         {poster ? (
           <img
             src={poster}

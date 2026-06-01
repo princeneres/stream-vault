@@ -23,7 +23,9 @@ export default function LibrarySection({
       style={{ contentVisibility: "auto", containIntrinsicSize: "1px 280px" }}
     >
       <header className="flex items-end justify-between gap-4">
-        <h2 className="text-lg font-semibold text-(--color-text-primary)">{title}</h2>
+        <h2 className="font-display text-lg font-bold tracking-tight text-(--color-text-primary)">
+          {title}
+        </h2>
         {seeAllHref ? (
           <a
             href={seeAllHref}

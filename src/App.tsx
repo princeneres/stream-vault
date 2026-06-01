@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Home as HomeIcon, Settings as SettingsIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
@@ -16,14 +17,23 @@ import {
 } from "@/components/NoteCaptureModal";
 import type { PlayerRequest } from "@/components/PlayerOverlay";
 import Sidebar, { type SidebarItem } from "@/components/Sidebar";
+import TopBar from "@/components/TopBar";
 import { ToastProvider, useToast } from "@/components/Toast";
-import { listLibraries, onItemProgress, onNoteSaved } from "@/lib/api";
+import { listLibraries, onItemProgress, onNoteSaved, scanLibrary } from "@/lib/api";
+import { useBreadcrumb } from "@/lib/breadcrumb";
+import { buildCommands } from "@/lib/commands";
 import {
   PlayerContext,
   type PlayerContextValue,
   type PlayerControls,
 } from "@/lib/player";
-import { type Route, useRoute } from "@/lib/router";
+import { type NavHistory, useHistory } from "@/lib/router";
+import {
+  applyMotion,
+  applyTheme,
+  getStoredMotion,
+} from "@/lib/theme";
+import { TopBarSlotProvider } from "@/lib/topbar";
 import type { Library, NoteSavedEvent } from "@/lib/types";
 
 // Route-level code splitting: Home is the landing view and stays eager; the
@@ -40,7 +50,9 @@ const NoteCaptureModal = lazy(() => import("@/components/NoteCaptureModal"));
 const PlayerOverlay = lazy(() => import("@/components/PlayerOverlay"));
 
 export default function App() {
-  const [view, setView] = useRoute();
+  const history = useHistory();
+  const view = history.route;
+  const setView = history.navigate;
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [progressTick, setProgressTick] = useState(0);
   const [notesTick, setNotesTick] = useState(0);
@@ -146,11 +158,10 @@ export default function App() {
           sidebarItems={sidebarItems}
           activeId={activeId}
           onSelect={handleSelect}
-          view={view}
+          history={history}
           libraries={libraries}
           progressTick={progressTick}
           notesTick={notesTick}
-          setView={setView}
           refreshLibraries={refreshLibraries}
         />
       </ConfirmProvider>
@@ -178,11 +189,10 @@ interface AppShellProps {
   sidebarItems: SidebarItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  view: Route;
+  history: NavHistory;
   libraries: Library[];
   progressTick: number;
   notesTick: number;
-  setView: (v: Route) => void;
   refreshLibraries: () => Promise<void>;
 }
 
@@ -190,18 +200,41 @@ function AppShell({
   sidebarItems,
   activeId,
   onSelect,
-  view,
+  history,
   libraries,
   progressTick,
   notesTick,
-  setView,
   refreshLibraries,
 }: AppShellProps) {
+  const view = history.route;
+  const setView = history.navigate;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [captureCtx, setCaptureCtx] = useState<NoteCaptureContext | null>(null);
   const [playerRequest, setPlayerRequest] = useState<PlayerRequest | null>(null);
+  const [contextActions, setContextActions] = useState<ReactNode>(null);
   const toast = useToast();
+  const crumbs = useBreadcrumb(view, libraries, setView);
+
+  // Views register/unregister their own TopBar actions via useTopBarActions;
+  // the unmount cleanup clears stale actions when switching views.
+
+  const toggleMotion = useCallback(() => {
+    applyMotion(!getStoredMotion());
+  }, []);
+
+  const commands = useMemo(
+    () =>
+      buildCommands({
+        navigate: setView,
+        libraries,
+        applyTheme,
+        toggleMotion,
+        rescan: (id) => scanLibrary(id).then(() => refreshLibraries()),
+        closePalette: () => setPaletteOpen(false),
+      }),
+    [setView, libraries, toggleMotion, refreshLibraries],
+  );
   const controlsRef = useRef<PlayerControls | null>(null);
   const playSeqRef = useRef(0);
 
@@ -272,6 +305,12 @@ function AppShell({
         } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "n") {
           e.preventDefault();
           triggerNoteCapture();
+        } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowLeft") {
+          e.preventDefault();
+          history.back();
+        } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowRight") {
+          e.preventDefault();
+          history.forward();
         }
         return;
       }
@@ -297,9 +336,9 @@ function AppShell({
       } else if (e.key === "?") {
         e.preventDefault();
         setShortcutsOpen(true);
-      } else if (e.key === "Escape" && view.kind !== "home") {
+      } else if (e.key === "Escape" && history.canBack) {
         e.preventDefault();
-        setView({ kind: "home" });
+        history.back();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -307,7 +346,7 @@ function AppShell({
       document.removeEventListener("keydown", onKey);
       if (chordTimer) clearTimeout(chordTimer);
     };
-  }, [paletteOpen, shortcutsOpen, captureCtx, setView, view.kind, triggerNoteCapture]);
+  }, [paletteOpen, shortcutsOpen, captureCtx, setView, history, triggerNoteCapture]);
 
   return (
     <PlayerContext.Provider value={playerContext}>
@@ -330,6 +369,7 @@ function AppShell({
           <CommandPalette
             open={paletteOpen}
             onClose={() => setPaletteOpen(false)}
+            commands={commands}
             onOpenGroup={(id) => {
               setView({ kind: "group", id });
               setPaletteOpen(false);
@@ -355,36 +395,46 @@ function AppShell({
           />
         ) : null}
       </Suspense>
-      <main
-        id="main"
-        tabIndex={-1}
-        className="flex-1 overflow-y-auto outline-none"
-      >
-        <Suspense fallback={<ViewFallback />}>
-          {view.kind === "home" ? (
-            <Home
-              libraries={libraries}
-              onOpenLibrary={openLibrary}
-              onOpenGroup={openGroup}
-              progressTick={progressTick}
-            />
-          ) : view.kind === "library" ? (
-            <LibraryView
-              libraryId={view.id}
-              onOpenGroup={openGroup}
-              progressTick={progressTick}
-            />
-          ) : view.kind === "group" ? (
-            <DetailView
-              groupId={view.id}
-              progressTick={progressTick}
-              notesTick={notesTick}
-            />
-          ) : (
-            <Settings onLibrariesChanged={refreshLibraries} />
-          )}
-        </Suspense>
-      </main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar
+          history={history}
+          crumbs={crumbs}
+          onSearch={() => setPaletteOpen(true)}
+          actions={contextActions}
+        />
+        <main
+          id="main"
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto outline-none"
+        >
+          <TopBarSlotProvider setActions={setContextActions}>
+            <Suspense fallback={<ViewFallback />}>
+              {view.kind === "home" ? (
+                <Home
+                  libraries={libraries}
+                  onOpenLibrary={openLibrary}
+                  onOpenGroup={openGroup}
+                  progressTick={progressTick}
+                />
+              ) : view.kind === "library" ? (
+                <LibraryView
+                  libraryId={view.id}
+                  onOpenGroup={openGroup}
+                  progressTick={progressTick}
+                />
+              ) : view.kind === "group" ? (
+                <DetailView
+                  groupId={view.id}
+                  progressTick={progressTick}
+                  notesTick={notesTick}
+                />
+              ) : (
+                <Settings onLibrariesChanged={refreshLibraries} />
+              )}
+            </Suspense>
+          </TopBarSlotProvider>
+        </main>
+      </div>
     </div>
     </PlayerContext.Provider>
   );

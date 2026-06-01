@@ -14,10 +14,10 @@ const SHORTCUTS: { section: string; rows: Row[] }[] = [
   {
     section: "General",
     rows: [
-      { keys: ["/"], label: "Open search" },
-      { keys: ["Ctrl", "K"], label: "Open search" },
+      { keys: ["/"], label: "Open search & commands" },
+      { keys: ["Ctrl", "K"], label: "Open search & commands" },
       { keys: ["?"], label: "Show keyboard shortcuts" },
-      { keys: ["Esc"], label: "Close dialogs / back to home" },
+      { keys: ["Esc"], label: "Close dialogs / go back" },
     ],
   },
   {
@@ -25,6 +25,8 @@ const SHORTCUTS: { section: string; rows: Row[] }[] = [
     rows: [
       { keys: ["g", "h"], label: "Go to home" },
       { keys: ["g", "s"], label: "Go to settings" },
+      { keys: ["Alt", "←"], label: "Back" },
+      { keys: ["Alt", "→"], label: "Forward" },
     ],
   },
   {

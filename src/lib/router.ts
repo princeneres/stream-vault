@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 export type Route =
   | { kind: "home" }
@@ -35,29 +35,110 @@ export function routeToPath(r: Route): string {
   }
 }
 
-export function useRoute(): [Route, (r: Route) => void] {
-  const [route, setRoute] = useState<Route>(() => {
-    if (typeof window === "undefined") return { kind: "home" };
-    return parseHash(window.location.hash) ?? { kind: "home" };
-  });
+export interface NavHistory {
+  route: Route;
+  /** Push a new entry (drops any forward history). */
+  navigate: (r: Route) => void;
+  back: () => void;
+  forward: () => void;
+  canBack: boolean;
+  canForward: boolean;
+}
 
+interface HistoryState {
+  stack: Route[];
+  index: number;
+}
+
+type HistoryAction =
+  | { type: "PUSH"; route: Route }
+  | { type: "BACK" }
+  | { type: "FORWARD" }
+  | { type: "EXTERNAL"; route: Route };
+
+function sameRoute(a: Route, b: Route): boolean {
+  return routeToPath(a) === routeToPath(b);
+}
+
+function historyReducer(
+  state: HistoryState,
+  action: HistoryAction,
+): HistoryState {
+  switch (action.type) {
+    case "PUSH":
+    case "EXTERNAL": {
+      if (sameRoute(state.stack[state.index], action.route)) return state;
+      const truncated = state.stack.slice(0, state.index + 1);
+      return { stack: [...truncated, action.route], index: truncated.length };
+    }
+    case "BACK":
+      return state.index > 0 ? { ...state, index: state.index - 1 } : state;
+    case "FORWARD":
+      return state.index < state.stack.length - 1
+        ? { ...state, index: state.index + 1 }
+        : state;
+  }
+}
+
+function initialState(): HistoryState {
+  const route =
+    typeof window === "undefined"
+      ? { kind: "home" as const }
+      : parseHash(window.location.hash) ?? { kind: "home" as const };
+  return { stack: [route], index: 0 };
+}
+
+/**
+ * In-memory navigation history layered over the URL hash. The hash is kept in
+ * sync (so reload restores the route and the skip link works), but back/forward
+ * and the canBack/canForward flags come from the explicit stack.
+ */
+export function useHistory(): NavHistory {
+  const [state, dispatch] = useReducer(historyReducer, undefined, initialState);
+  const route = state.stack[state.index];
+
+  // Track hashes we set ourselves so the hashchange listener can ignore them.
+  const selfHashRef = useRef<string | null>(null);
+
+  // Keep the URL hash in sync with the active route.
+  useEffect(() => {
+    const next = "#" + routeToPath(route);
+    if (window.location.hash !== next) {
+      selfHashRef.current = next;
+      window.location.hash = next;
+    }
+  }, [route]);
+
+  // React to external hash changes (manual edits, native back gestures).
   useEffect(() => {
     const onChange = () => {
+      if (selfHashRef.current === window.location.hash) {
+        selfHashRef.current = null;
+        return;
+      }
       const next = parseHash(window.location.hash);
-      if (next !== null) setRoute(next);
+      if (next !== null) dispatch({ type: "EXTERNAL", route: next });
     };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
 
-  const navigate = useCallback((r: Route) => {
-    const next = "#" + routeToPath(r);
-    if (window.location.hash !== next) {
-      window.location.hash = next;
-    } else {
-      setRoute(r);
-    }
-  }, []);
+  const navigate = useCallback((r: Route) => dispatch({ type: "PUSH", route: r }), []);
+  const back = useCallback(() => dispatch({ type: "BACK" }), []);
+  const forward = useCallback(() => dispatch({ type: "FORWARD" }), []);
 
+  return {
+    route,
+    navigate,
+    back,
+    forward,
+    canBack: state.index > 0,
+    canForward: state.index < state.stack.length - 1,
+  };
+}
+
+/** Backwards-compatible thin wrapper. */
+export function useRoute(): [Route, (r: Route) => void] {
+  const { route, navigate } = useHistory();
   return [route, navigate];
 }

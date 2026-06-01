@@ -59,11 +59,8 @@ import type {
   GroupDetail,
   ItemWithProgress,
 } from "@/lib/types";
-import {
-  applyItemPrefs,
-  DEFAULT_PREFS,
-  type ViewPrefs,
-} from "@/lib/viewPrefs";
+import { applyItemPrefs, useViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
+import { useTopBarActions } from "@/lib/topbar";
 
 export interface DetailViewProps {
   groupId: number;
@@ -418,7 +415,7 @@ export default function DetailView({
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [prefs, setPrefs] = useState<ViewPrefs>(DEFAULT_PREFS);
+  const [prefs, setPrefs] = useViewPrefs(`grp:${groupId}`);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [cache, setCache] = useState<TreeCache>(new Map());
   const [query, setQuery] = useState("");
@@ -433,7 +430,6 @@ export default function DetailView({
   }, [cache]);
 
   useEffect(() => {
-    setPrefs(DEFAULT_PREFS);
     setExpanded(new Set());
     setCache(new Map());
     setQuery("");
@@ -700,6 +696,17 @@ export default function DetailView({
     [deferredQuery, groupId, cache],
   );
 
+  const detailHasContents = Boolean(
+    detail &&
+      (detail.items.length > 0 ||
+        detail.subgroups.length > 0 ||
+        detail.attachments.length > 0),
+  );
+  useTopBarActions(
+    detailHasContents ? <ViewControls prefs={prefs} onChange={setPrefs} /> : null,
+    [detailHasContents, prefs],
+  );
+
   if (error) {
     return (
       <div className="px-8 py-10">
@@ -775,7 +782,7 @@ export default function DetailView({
             </button>
           </div>
           <div className="flex-1 space-y-3">
-            <h1 className="text-pretty text-3xl font-semibold text-(--color-text-primary) drop-shadow-md">
+            <h1 className="font-display text-pretty text-3xl font-bold tracking-tight text-(--color-text-primary) drop-shadow-md">
               {group.title}
             </h1>
             {group.itemCount > 0 ? (
@@ -809,7 +816,6 @@ export default function DetailView({
               <h2 className="text-base font-semibold text-(--color-text-primary)">
                 Contents
               </h2>
-              <ViewControls prefs={prefs} onChange={setPrefs} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Input
