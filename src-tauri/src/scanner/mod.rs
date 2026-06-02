@@ -404,7 +404,7 @@ mod tests {
 
         let db = Database::new(&tmp.path().join("db.sqlite")).unwrap();
         let lib = db
-            .insert_library("Tutorials", root.to_str().unwrap(), LibraryKind::Courses)
+            .insert_library("Tutorials", root.to_str().unwrap(), LibraryKind::Courses, None)
             .unwrap();
 
         let r1 = scan(&lib, &db).unwrap();
@@ -468,7 +468,7 @@ mod tests {
 
         let db = Database::new(&tmp.path().join("db.sqlite")).unwrap();
         let lib = db
-            .insert_library("C", root.to_str().unwrap(), LibraryKind::Courses)
+            .insert_library("C", root.to_str().unwrap(), LibraryKind::Courses, None)
             .unwrap();
 
         scan(&lib, &db).unwrap();
@@ -496,7 +496,7 @@ mod tests {
 
         let db = Database::new(&tmp.path().join("db.sqlite")).unwrap();
         let lib = db
-            .insert_library("Series", root.to_str().unwrap(), LibraryKind::Series)
+            .insert_library("Series", root.to_str().unwrap(), LibraryKind::Series, None)
             .unwrap();
         scan(&lib, &db).unwrap();
 
@@ -516,7 +516,7 @@ mod tests {
 
         let db = Database::new(&tmp.path().join("db.sqlite")).unwrap();
         let lib = db
-            .insert_library("Movies", root.to_str().unwrap(), LibraryKind::Movies)
+            .insert_library("Movies", root.to_str().unwrap(), LibraryKind::Movies, None)
             .unwrap();
         scan(&lib, &db).unwrap();
 

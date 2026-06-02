@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Local-first desktop app for watching downloaded courses, TV series, and movies with progress tracking. Tauri shell, mpv as the player, SQLite for state.
+Local-first desktop app for watching any folder of videos in sequence — courses, series, talks, tutorials, anything — with progress tracking. Tauri shell, mpv as the player, SQLite for state. Scanner *presets* (`courses`/`series`/`movies`/`generic`) tune how a folder is read; `generic` is the default. Each library has an optional unit label ("lesson", "episode", "part", …).
 
 ## Stack
 

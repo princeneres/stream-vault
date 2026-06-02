@@ -39,6 +39,17 @@ impl LibraryKind {
             _ => None,
         }
     }
+
+    /// Singular unit term shown in the UI when a library has no custom
+    /// `item_label`. The frontend pluralizes as needed.
+    pub fn default_item_label(self) -> &'static str {
+        match self {
+            LibraryKind::Courses => "lesson",
+            LibraryKind::Series => "episode",
+            LibraryKind::Movies => "movie",
+            LibraryKind::Generic => "video",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +59,9 @@ pub struct Library {
     pub name: String,
     pub root_path: String,
     pub kind: LibraryKind,
+    /// Custom singular unit term (e.g. "lesson", "part"). `None` falls back to
+    /// `kind.default_item_label()`.
+    pub item_label: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_scanned_at: Option<DateTime<Utc>>,
     /// Transient — true if `root_path` exists at query time.

@@ -822,7 +822,7 @@ export default function DetailView({
                 ref={searchInputRef}
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder="Search this course…"
+                placeholder="Search…"
                 aria-label="Search items and folders in this group"
                 spellCheck={false}
                 autoComplete="off"

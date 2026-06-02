@@ -4,9 +4,11 @@
 
 # Stream Vault
 
-**A local-first desktop app for your downloaded courses, TV series, and movies.**
+**A local-first desktop app for any folder of videos you watch in sequence.**
 
-Watch what you own, track what you watched — without the cloud.
+Courses, lecture series, conference talks, gameplays, tutorials, workshop
+recordings, family videos — whatever you've got on disk. Watch what you own,
+resume where you stopped, track what you watched — without the cloud.
 
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
@@ -22,16 +24,27 @@ Watch what you own, track what you watched — without the cloud.
 
 ## Why Stream Vault?
 
-If you have a folder of courses, a series collection, or a movie library on disk and you're tired of bouncing between VLC, file managers, and spreadsheets to remember **what you watched and where you stopped** — Stream Vault is for you.
+If you have **any folder of videos you mean to watch in order** — a downloaded
+course, a season of talks, a backlog of tutorials, a pile of recordings — and
+you're tired of bouncing between VLC, file managers, and spreadsheets to
+remember **what you watched and where you stopped**, Stream Vault is for you.
 
-It's a thin, fast desktop shell over [`mpv`](https://mpv.io). No streaming server. No login. No telemetry. Your files stay where they are; the app just indexes, plays, and remembers.
+Point it at a folder, and it indexes, plays, and remembers. It's a thin, fast
+desktop shell over [`mpv`](https://mpv.io). No streaming server. No login. No
+telemetry. Your files stay exactly where they are.
 
 ## Features
 
-- **Multiple library kinds** — `Courses`, `Series`, `Movies`, `Generic`. Each gets the right scanner and the right UI.
+- **Works with any video folder** — the default **Video folder** preset mirrors
+  your folders as-is. Tell it what to call each video ("video", "lesson",
+  "episode", "part", …) and that label shows throughout the UI.
+- **Smart scanner presets** — optional layouts for common cases: `Course`
+  (nested modules), `TV series` (Season/episode + `SxxExx`), `Movies` (flat).
+  Pick a preset at creation, or change it later — a rescan re-reads the folder
+  and **keeps your progress**.
 - **Resume where you stopped** — progress saved every 3s while playing; auto-marked completed past 90%.
 - **Continue Watching** on Home — your in-progress items, ordered by recency.
-- **Smart scanners** — handle nested folders, season patterns (`SxxExx`), release tags, leading numbers (`01 -`).
+- **Smart cleanup** — handles nested folders, season patterns (`SxxExx`), release tags, leading numbers (`01 -`).
 - **Auto-generated artwork** — thumbnails and posters via `ffmpeg` after each scan.
 - **Custom posters** — pick any thumbnail as the group poster.
 - **Incremental re-scans** — match files by path, preserve IDs and progress.
@@ -76,9 +89,14 @@ Other platforms (Windows / macOS) are structured-for but not yet shipped — con
 
 1. Open Stream Vault.
 2. **Settings → Add Library** and pick a folder.
-3. Choose its kind: *Courses*, *Series*, *Movies*, or *Generic*.
+3. Keep the default **Video folder** preset (works for any collection), or pick
+   a preset that matches your layout: *Course*, *TV series*, or *Movies*.
+   Optionally set a **unit label** ("lesson", "episode", "part", …).
 4. Click **Scan** and let it index.
 5. Pick anything and hit play — `mpv` opens, progress is tracked automatically.
+
+> Changed your mind about the preset or label? Use the **Edit** button on any
+> library in Settings. Changing the preset rescans and preserves your progress.
 
 The first launch creates `streamvault.db` under your platform's app data dir (Linux: `~/.local/share/app.streamvault.dev/`).
 
@@ -135,12 +153,21 @@ The four contract files (`models.rs`, `lib/types.ts`, `db.rs`, `commands.rs`) ar
 
 ## Domain model
 
-A **Library** is a user-configured root folder with a `kind`. It contains nested **Groups** (a course, a season, a module) and leaf **Items** (a video file). **Progress** is per-item.
+A **Library** is a user-configured root folder. It contains nested **Groups**
+(a folder, a season, a module) and leaf **Items** (a video file). **Progress** is
+per-item, and each library carries an optional **unit label** for how items are
+named in the UI.
 
-- Movies skip groups (`group_id = NULL`).
-- Courses and series use one or two levels via `parent_group_id`.
+The schema is **uniform** — it fits any collection of videos. A library's `kind`
+only selects which *scanner preset* reads the folder:
 
-The same schema fits all kinds — only the scanner differs.
+- **Video folder** (`generic`) — mirrors the folder tree exactly. The default.
+- **Course** (`courses`) — arbitrary nesting; leading numbers set order.
+- **TV series** (`series`) — Season/episode folders + `SxxExx` filenames.
+- **Movies** (`movies`) — flat; items skip groups (`group_id = NULL`).
+
+Because the scanner reconciles by `file_path`, you can switch presets at any time
+and a rescan preserves existing progress.
 
 ## Playback flow
 
@@ -158,6 +185,7 @@ Only one mpv instance at a time — a new `play_item` kills the previous session
 
 ## Roadmap
 
+- [x] Editable library preset & custom unit labels
 - [ ] Windows and macOS builds
 - [ ] Subtitle download integration
 - [ ] Watch history view

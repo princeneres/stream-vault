@@ -53,6 +53,10 @@ impl Database {
             guard.execute_batch(MIGRATION_V1_NOTES)?;
             guard.pragma_update(None, "user_version", 1)?;
         }
+        if version < 2 {
+            guard.execute_batch(MIGRATION_V2_ITEM_LABEL)?;
+            guard.pragma_update(None, "user_version", 2)?;
+        }
         Ok(())
     }
 }
@@ -137,6 +141,14 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS idx_notes_item_id ON notes(item_id);
 "#;
 
+/// Migration V2: per-library `item_label` — the configurable unit term shown in
+/// the UI (e.g. "video", "lesson", "episode", "part"). NULL means fall back to
+/// the default derived from the library's `kind`. Idempotent, gated by
+/// `PRAGMA user_version`.
+const MIGRATION_V2_ITEM_LABEL: &str = r#"
+ALTER TABLE libraries ADD COLUMN item_label TEXT;
+"#;
+
 // ---- Query layer ----------------------------------------------------------
 
 use chrono::{DateTime, Utc};
@@ -168,6 +180,7 @@ fn library_from_row(r: &Row<'_>) -> rusqlite::Result<Library> {
         name: r.get("name")?,
         root_path: r.get("root_path")?,
         kind,
+        item_label: r.get("item_label")?,
         created_at: parse_ts(&created_at_s),
         last_scanned_at: last_scanned_at_s.as_deref().map(parse_ts),
         available: false,
@@ -313,15 +326,38 @@ impl Database {
         name: &str,
         root_path: &str,
         kind: LibraryKind,
+        item_label: Option<&str>,
     ) -> Result<Library> {
         self.with_conn(|c| {
             c.execute(
-                "INSERT INTO libraries (name, root_path, kind) VALUES (?, ?, ?)",
-                params![name, root_path, kind.as_str()],
+                "INSERT INTO libraries (name, root_path, kind, item_label) VALUES (?, ?, ?, ?)",
+                params![name, root_path, kind.as_str(), item_label],
             )?;
             let id = c.last_insert_rowid();
             let mut stmt = c.prepare(
-                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries WHERE id = ?",
+                "SELECT id, name, root_path, kind, item_label, created_at, last_scanned_at FROM libraries WHERE id = ?",
+            )?;
+            let lib = stmt.query_row([id], library_from_row)?;
+            Ok(lib)
+        })
+    }
+
+    /// Update mutable library fields. `item_label = None` clears it back to the
+    /// kind-derived default. Returns the refreshed row.
+    pub fn update_library(
+        &self,
+        id: i64,
+        name: &str,
+        kind: LibraryKind,
+        item_label: Option<&str>,
+    ) -> Result<Library> {
+        self.with_conn(|c| {
+            c.execute(
+                "UPDATE libraries SET name = ?, kind = ?, item_label = ? WHERE id = ?",
+                params![name, kind.as_str(), item_label, id],
+            )?;
+            let mut stmt = c.prepare(
+                "SELECT id, name, root_path, kind, item_label, created_at, last_scanned_at FROM libraries WHERE id = ?",
             )?;
             let lib = stmt.query_row([id], library_from_row)?;
             Ok(lib)
@@ -338,7 +374,7 @@ impl Database {
     pub fn list_libraries_raw(&self) -> Result<Vec<Library>> {
         self.with_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries ORDER BY id",
+                "SELECT id, name, root_path, kind, item_label, created_at, last_scanned_at FROM libraries ORDER BY id",
             )?;
             let rows = stmt.query_map([], library_from_row)?;
             let mut out = Vec::new();
@@ -352,7 +388,7 @@ impl Database {
     pub fn get_library_by_id(&self, id: i64) -> Result<Option<Library>> {
         self.with_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, name, root_path, kind, created_at, last_scanned_at FROM libraries WHERE id = ?",
+                "SELECT id, name, root_path, kind, item_label, created_at, last_scanned_at FROM libraries WHERE id = ?",
             )?;
             let lib = stmt.query_row([id], library_from_row).optional()?;
             Ok(lib)
@@ -1006,7 +1042,7 @@ mod tests {
     #[test]
     fn continue_watching_orders_by_watched_at_desc() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L", LibraryKind::Movies).unwrap();
+        let lib = db.insert_library("L", "/tmp/L", LibraryKind::Movies, None).unwrap();
         let a = db
             .upsert_item_by_file_path(lib.id, None, "A", 1, "/tmp/L/a.mp4", None, None, None, None)
             .unwrap();
@@ -1026,7 +1062,7 @@ mod tests {
     #[test]
     fn continue_watching_excludes_completed_and_zero() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L2", LibraryKind::Movies).unwrap();
+        let lib = db.insert_library("L", "/tmp/L2", LibraryKind::Movies, None).unwrap();
         let a = db
             .upsert_item_by_file_path(lib.id, None, "A", 1, "/tmp/L2/a.mp4", None, None, None, None)
             .unwrap();
@@ -1047,7 +1083,7 @@ mod tests {
     #[test]
     fn next_item_returns_first_incomplete() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L3", LibraryKind::Series).unwrap();
+        let lib = db.insert_library("L", "/tmp/L3", LibraryKind::Series, None).unwrap();
         let g = db
             .upsert_group_by_folder_path(lib.id, None, "S", 1, "/tmp/L3/S", None)
             .unwrap();
@@ -1065,7 +1101,7 @@ mod tests {
     #[test]
     fn next_item_falls_back_when_all_completed() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L4", LibraryKind::Series).unwrap();
+        let lib = db.insert_library("L", "/tmp/L4", LibraryKind::Series, None).unwrap();
         let g = db
             .upsert_group_by_folder_path(lib.id, None, "S", 1, "/tmp/L4/S", None)
             .unwrap();
@@ -1084,7 +1120,7 @@ mod tests {
     #[test]
     fn next_item_walks_subgroups() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L5", LibraryKind::Courses).unwrap();
+        let lib = db.insert_library("L", "/tmp/L5", LibraryKind::Courses, None).unwrap();
         let parent = db
             .upsert_group_by_folder_path(lib.id, None, "Course", 1, "/tmp/L5/c", None)
             .unwrap();
@@ -1108,7 +1144,7 @@ mod tests {
     #[test]
     fn search_finds_groups_and_items_case_insensitive() {
         let (_d, db) = fresh();
-        let lib = db.insert_library("L", "/tmp/L6", LibraryKind::Generic).unwrap();
+        let lib = db.insert_library("L", "/tmp/L6", LibraryKind::Generic, None).unwrap();
         let _g = db
             .upsert_group_by_folder_path(lib.id, None, "Rust Course", 1, "/tmp/L6/rust", None)
             .unwrap();
@@ -1124,7 +1160,7 @@ mod tests {
     fn group_aggregates_count_descendant_items_and_completed() {
         let (_d, db) = fresh();
         let lib = db
-            .insert_library("L", "/tmp/L7", LibraryKind::Courses)
+            .insert_library("L", "/tmp/L7", LibraryKind::Courses, None)
             .unwrap();
         let parent = db
             .upsert_group_by_folder_path(lib.id, None, "Course", 1, "/tmp/L7/c", None)
@@ -1171,7 +1207,7 @@ mod tests {
     fn item_uuid_trigger_fills_on_insert() {
         let (_d, db) = fresh();
         let lib = db
-            .insert_library("L", "/tmp/uuidtest", LibraryKind::Movies)
+            .insert_library("L", "/tmp/uuidtest", LibraryKind::Movies, None)
             .unwrap();
         let item = db
             .upsert_item_by_file_path(

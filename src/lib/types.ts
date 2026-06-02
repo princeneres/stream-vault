@@ -14,6 +14,9 @@ export interface Library {
   name: string;
   rootPath: string;
   kind: LibraryKind;
+  /** Custom singular unit term (e.g. "lesson", "part"). `null` falls back to
+   *  the kind-derived default. */
+  itemLabel: string | null;
   createdAt: string;
   lastScannedAt: string | null;
   /** Transient — true if `rootPath` exists at query time. */

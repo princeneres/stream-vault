@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BookOpen,
   Folder,
+  Pencil,
   Plus,
   RefreshCw,
   Trash2,
@@ -26,6 +27,7 @@ import {
   republishVault,
   scanLibrary,
   setSetting,
+  updateLibrary,
 } from "@/lib/api";
 import {
   applyMotion,
@@ -36,12 +38,23 @@ import {
 } from "@/lib/theme";
 import type { Library, LibraryKind, ScanResult } from "@/lib/types";
 
+// `generic` first — it's the default for "any folder of videos in sequence".
+// The other kinds are scanner presets for common layouts.
 const KIND_OPTIONS: { value: LibraryKind; label: string }[] = [
-  { value: "courses", label: "Courses" },
-  { value: "series", label: "Series" },
-  { value: "movies", label: "Movies" },
-  { value: "generic", label: "Generic" },
+  { value: "generic", label: "Video folder (any sequence)" },
+  { value: "courses", label: "Course (nested modules)" },
+  { value: "series", label: "TV series (seasons/episodes)" },
+  { value: "movies", label: "Movies (flat)" },
 ];
+
+const KIND_DESCRIPTIONS: Record<LibraryKind, string> = {
+  generic: "Mirrors your folders exactly. Any collection of videos to watch in order.",
+  courses: "Nested folders become modules; leading numbers set the order.",
+  series: "Parses Season/episode folders and SxxExx filenames.",
+  movies: "Flat list — files in the root or one video per subfolder.",
+};
+
+const DEFAULT_KIND: LibraryKind = "generic";
 
 export interface SettingsProps {
   /** Bumped when libraries are added/removed/scanned, so the App can refresh. */
@@ -58,6 +71,7 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
   const [savedSubfolder, setSavedSubfolder] = useState("");
   const [republishing, setRepublishing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<Library | null>(null);
   const [scanningId, setScanningId] = useState<number | null>(null);
   const { push: pushToast } = useToast();
   const confirm = useConfirm();
@@ -114,6 +128,32 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
       pushToast(`Scan failed: ${String(e)}`, "error");
     } finally {
       setScanningId(null);
+    }
+  };
+
+  const handleSaveEdit = async (
+    lib: Library,
+    changes: { name: string; kind: LibraryKind; itemLabel: string | null },
+  ) => {
+    const kindChanged = changes.kind !== lib.kind;
+    try {
+      const updated = await updateLibrary(
+        lib.id,
+        changes.name,
+        changes.kind,
+        changes.itemLabel,
+      );
+      setEditing(null);
+      await refreshLibraries();
+      onLibrariesChanged();
+      if (kindChanged) {
+        pushToast(`Updated "${updated.name}". Rescanning…`, "info");
+        await handleScan(updated);
+      } else {
+        pushToast(`Updated "${updated.name}"`, "success");
+      }
+    } catch (e) {
+      pushToast(`Update failed: ${String(e)}`, "error");
     }
   };
 
@@ -262,6 +302,13 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
                 >
                   {scanningId === lib.id ? "Scanning…" : "Rescan"}
                 </Button>
+                <IconButton
+                  icon={<Pencil size={14} />}
+                  tooltip="Edit"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEditing(lib)}
+                />
                 <IconButton
                   icon={<Trash2 size={14} />}
                   tooltip="Remove"
@@ -473,6 +520,12 @@ export default function Settings({ onLibrariesChanged }: SettingsProps) {
         }}
         onError={(e) => pushToast(`Add failed: ${e}`, "error")}
       />
+
+      <EditLibraryModal
+        library={editing}
+        onClose={() => setEditing(null)}
+        onSave={handleSaveEdit}
+      />
     </div>
   );
 }
@@ -487,14 +540,16 @@ interface AddLibraryModalProps {
 function AddLibraryModal({ open, onClose, onAdded, onError }: AddLibraryModalProps) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
-  const [kind, setKind] = useState<LibraryKind>("courses");
+  const [kind, setKind] = useState<LibraryKind>(DEFAULT_KIND);
+  const [itemLabel, setItemLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setName("");
       setPath("");
-      setKind("courses");
+      setKind(DEFAULT_KIND);
+      setItemLabel("");
       setSubmitting(false);
     }
   }, [open]);
@@ -518,7 +573,12 @@ function AddLibraryModal({ open, onClose, onAdded, onError }: AddLibraryModalPro
     if (!name.trim() || !path.trim()) return;
     setSubmitting(true);
     try {
-      const lib = await addLibrary(name.trim(), path.trim(), kind);
+      const lib = await addLibrary(
+        name.trim(),
+        path.trim(),
+        kind,
+        itemLabel.trim() || null,
+      );
       onAdded(lib);
       onClose();
     } catch (e) {
@@ -538,18 +598,35 @@ function AddLibraryModal({ open, onClose, onAdded, onError }: AddLibraryModalPro
           <Input
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="My Courses"
+            placeholder="My Videos"
           />
         </label>
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-(--color-text-secondary)">
-            Kind
+            Scanner preset
           </span>
           <Select
             value={kind}
             onChange={(e) => setKind(e.currentTarget.value as LibraryKind)}
             options={KIND_OPTIONS}
           />
+          <span className="text-[11px] text-(--color-text-muted)">
+            {KIND_DESCRIPTIONS[kind]}
+          </span>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-(--color-text-secondary)">
+            Unit label (optional)
+          </span>
+          <Input
+            value={itemLabel}
+            onChange={(e) => setItemLabel(e.currentTarget.value)}
+            placeholder="video, lesson, episode, part…"
+          />
+          <span className="text-[11px] text-(--color-text-muted)">
+            How each video is named in the UI. Leave blank for the preset
+            default.
+          </span>
         </label>
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-(--color-text-secondary)">
@@ -582,6 +659,107 @@ function AddLibraryModal({ open, onClose, onAdded, onError }: AddLibraryModalPro
             disabled={submitting || !name.trim() || !path.trim()}
           >
             {submitting ? "Adding…" : "Add"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface EditLibraryModalProps {
+  library: Library | null;
+  onClose: () => void;
+  onSave: (
+    library: Library,
+    changes: { name: string; kind: LibraryKind; itemLabel: string | null },
+  ) => Promise<void>;
+}
+
+function EditLibraryModal({ library, onClose, onSave }: EditLibraryModalProps) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<LibraryKind>(DEFAULT_KIND);
+  const [itemLabel, setItemLabel] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (library) {
+      setName(library.name);
+      setKind(library.kind);
+      setItemLabel(library.itemLabel ?? "");
+      setSubmitting(false);
+    }
+  }, [library]);
+
+  if (!library) return null;
+
+  const kindChanged = kind !== library.kind;
+
+  const handleSubmit = async () => {
+    if (!name.trim()) return;
+    setSubmitting(true);
+    await onSave(library, {
+      name: name.trim(),
+      kind,
+      itemLabel: itemLabel.trim() || null,
+    });
+    setSubmitting(false);
+  };
+
+  return (
+    <Modal open={!!library} onClose={onClose} title="Edit library">
+      <div className="space-y-4">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-(--color-text-secondary)">
+            Name
+          </span>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+          />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-(--color-text-secondary)">
+            Scanner preset
+          </span>
+          <Select
+            value={kind}
+            onChange={(e) => setKind(e.currentTarget.value as LibraryKind)}
+            options={KIND_OPTIONS}
+          />
+          <span className="text-[11px] text-(--color-text-muted)">
+            {KIND_DESCRIPTIONS[kind]}
+            {kindChanged
+              ? " Changing the preset triggers a rescan; your progress is preserved."
+              : ""}
+          </span>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-(--color-text-secondary)">
+            Unit label (optional)
+          </span>
+          <Input
+            value={itemLabel}
+            onChange={(e) => setItemLabel(e.currentTarget.value)}
+            placeholder="video, lesson, episode, part…"
+          />
+          <span className="text-[11px] text-(--color-text-muted)">
+            How each video is named in the UI. Leave blank for the preset
+            default.
+          </span>
+        </label>
+        <p className="truncate text-[11px] text-(--color-text-muted)">
+          {library.rootPath}
+        </p>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose} type="button">
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={submitting || !name.trim()}
+          >
+            {submitting ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>

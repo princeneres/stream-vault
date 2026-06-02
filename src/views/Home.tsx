@@ -228,6 +228,7 @@ export default function Home({
                   title={group.title}
                   poster={thumbSrc(group.posterPath)}
                   kind={lib.kind}
+                  itemLabel={lib.itemLabel}
                   totalCount={group.itemCount}
                   completedCount={group.completedCount}
                   onActivate={onOpenGroup}

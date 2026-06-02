@@ -48,9 +48,10 @@ pub fn add_library(
     name: String,
     root_path: String,
     kind: LibraryKind,
+    item_label: Option<String>,
 ) -> CmdResult<Library> {
     let mut lib = db
-        .insert_library(&name, &root_path, kind)
+        .insert_library(&name, &root_path, kind, item_label.as_deref())
         .map_err(cmd_err)?;
     lib.available = Path::new(&lib.root_path).is_dir();
     if let Err(e) = app.asset_protocol_scope().allow_directory(&lib.root_path, true) {
@@ -59,6 +60,26 @@ pub fn add_library(
             lib.root_path
         );
     }
+    Ok(lib)
+}
+
+/// Update a library's mutable fields (name, scanner kind, unit label).
+/// Does not re-scan — when `kind` changes the caller should invoke
+/// `scan_library` afterwards. The re-scan is incremental (keyed by
+/// `file_path`), so progress is preserved across a kind change.
+/// `item_label = null` clears the unit term back to the kind default.
+#[tauri::command]
+pub fn update_library(
+    db: State<'_, Database>,
+    library_id: i64,
+    name: String,
+    kind: LibraryKind,
+    item_label: Option<String>,
+) -> CmdResult<Library> {
+    let mut lib = db
+        .update_library(library_id, &name, kind, item_label.as_deref())
+        .map_err(cmd_err)?;
+    lib.available = Path::new(&lib.root_path).is_dir();
     Ok(lib)
 }
 

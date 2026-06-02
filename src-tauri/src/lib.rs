@@ -62,9 +62,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_libraries,
             commands::add_library,
+            commands::update_library,
             commands::remove_library,
             commands::scan_library,
             commands::get_library_contents,
+            commands::get_library_playlist,
             commands::get_group,
             commands::get_continue_watching,
             commands::get_next_item,

@@ -543,7 +543,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let file = root.join("v.mp4");
         std::fs::write(&file, b"0123456789").unwrap();
-        db.insert_library("L", root.to_str().unwrap(), crate::models::LibraryKind::Movies)
+        db.insert_library("L", root.to_str().unwrap(), crate::models::LibraryKind::Movies, None)
             .unwrap();
 
         let port = start(db).unwrap();

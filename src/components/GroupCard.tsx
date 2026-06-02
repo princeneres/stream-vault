@@ -1,6 +1,7 @@
 import { memo, type CSSProperties } from "react";
 import { Layers } from "lucide-react";
 import type { LibraryKind } from "@/lib/types";
+import { kindLabel, unitLabel } from "@/lib/labels";
 import KindIcon from "./KindIcon";
 import { cn } from "./cn";
 
@@ -14,6 +15,7 @@ export interface GroupCardProps {
   title: string;
   poster?: string | null;
   kind: LibraryKind;
+  itemLabel?: string | null;
   completedCount?: number;
   totalCount?: number;
   nextEpisode?: string;
@@ -23,19 +25,17 @@ export interface GroupCardProps {
 }
 
 function metadata(props: GroupCardProps): string | null {
-  if (props.kind === "courses" && typeof props.totalCount === "number") {
-    return `${props.completedCount ?? 0} / ${props.totalCount} lessons`;
+  const lib = { kind: props.kind, itemLabel: props.itemLabel ?? null };
+  if (props.kind === "series" && props.nextEpisode) {
+    return `Next: ${props.nextEpisode}`;
   }
-  if (props.kind === "series") {
-    if (props.nextEpisode) return `Next: ${props.nextEpisode}`;
-    if (typeof props.totalCount === "number") {
-      return `${props.completedCount ?? 0} / ${props.totalCount} episodes`;
-    }
+  if (typeof props.totalCount !== "number") return null;
+  // Movies and generic libraries show a plain total; counted kinds show
+  // completed-over-total progress.
+  if (props.kind === "movies" || props.kind === "generic") {
+    return unitLabel(lib, props.totalCount);
   }
-  if (props.kind === "generic" && typeof props.totalCount === "number") {
-    return `${props.totalCount} items`;
-  }
-  return null;
+  return `${props.completedCount ?? 0} / ${unitLabel(lib, props.totalCount)}`;
 }
 
 function GroupCardImpl(props: GroupCardProps) {
@@ -71,7 +71,7 @@ function GroupCardImpl(props: GroupCardProps) {
         )}
         <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-(--radius-pill) bg-(--color-bg)/70 px-2 py-0.5 text-[11px] text-(--color-text-secondary)">
           <KindIcon kind={kind} size={12} />
-          <span className="capitalize">{kind}</span>
+          <span>{kindLabel(kind)}</span>
         </span>
       </div>
       <div className="px-0.5">

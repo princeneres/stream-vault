@@ -161,7 +161,7 @@ export default function LibraryView({
           {sortedTopItems.length > 0 ? (
             <section className="space-y-3">
               <h2 className="text-base font-semibold text-(--color-text-primary)">
-                Loose items
+                Ungrouped videos
               </h2>
               <div className="-mx-1 flex flex-wrap gap-4 px-1">
                 {sortedTopItems.map((item) => (
@@ -185,6 +185,7 @@ export default function LibraryView({
                 title={group.title}
                 poster={thumbSrc(group.posterPath)}
                 kind={library.kind}
+                itemLabel={library.itemLabel}
                 totalCount={group.itemCount}
                 completedCount={group.completedCount}
                 onActivate={onOpenGroup}

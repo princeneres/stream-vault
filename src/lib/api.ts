@@ -25,8 +25,33 @@ export function addLibrary(
     name: string,
     rootPath: string,
     kind: LibraryKind,
+    itemLabel?: string | null,
 ): Promise<Library> {
-    return invoke<Library>("add_library", { name, rootPath, kind });
+    return invoke<Library>("add_library", {
+        name,
+        rootPath,
+        kind,
+        itemLabel: itemLabel ?? null,
+    });
+}
+
+/**
+ * Update a library's mutable fields. `itemLabel = null` clears the unit term
+ * back to the kind default. When `kind` changes, follow with `scanLibrary` —
+ * the re-scan is incremental and preserves progress.
+ */
+export function updateLibrary(
+    libraryId: number,
+    name: string,
+    kind: LibraryKind,
+    itemLabel: string | null,
+): Promise<Library> {
+    return invoke<Library>("update_library", {
+        libraryId,
+        name,
+        kind,
+        itemLabel,
+    });
 }
 
 export function removeLibrary(libraryId: number): Promise<void> {
