@@ -6,6 +6,7 @@ import {
 } from "react";
 import {
   Keyboard,
+  ListVideo,
   Maximize,
   Minimize,
   Pause,
@@ -18,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import IconButton from "./IconButton";
+import PlayerSidebar from "./PlayerSidebar";
 import { cn } from "./cn";
 import {
   getItem,
@@ -43,6 +45,7 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "[ / ]", action: "Speed down / up" },
   { keys: "0 – 9", action: "Jump to 0%–90%" },
   { keys: "F", action: "Fullscreen" },
+  { keys: "P", action: "Toggle playlist" },
   { keys: "Alt + N", action: "Capture note" },
   { keys: "?", action: "Toggle this help" },
   { keys: "Esc", action: "Close player" },
@@ -116,6 +119,7 @@ export default function PlayerOverlay({
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
 
   const lastReportRef = useRef(0);
@@ -371,6 +375,17 @@ export default function PlayerOverlay({
     onClose();
   }, [flushProgress, onClose]);
 
+  // Switch to another item in the same group from the sidebar. Persist the
+  // current position first so progress isn't lost.
+  const handleSelectItem = useCallback(
+    (itemId: number) => {
+      if (itemId === current.itemId) return;
+      flushProgress();
+      setCurrent({ itemId });
+    },
+    [current.itemId, flushProgress],
+  );
+
   // Keyboard shortcuts (capture phase so they run before the global handler).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -390,6 +405,7 @@ export default function PlayerOverlay({
       switch (e.key) {
         case "Escape":
           if (showHelp) setShowHelp(false);
+          else if (showSidebar) setShowSidebar(false);
           else if (!document.fullscreenElement) handleClose();
           else return;
           break;
@@ -423,6 +439,9 @@ export default function PlayerOverlay({
         case "]":
           stepRate(1);
           break;
+        case "p":
+          setShowSidebar((s) => !s);
+          break;
         case "?":
           setShowHelp((s) => !s);
           break;
@@ -440,6 +459,7 @@ export default function PlayerOverlay({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [
     showHelp,
+    showSidebar,
     handleClose,
     togglePlay,
     seekBy,
@@ -515,6 +535,14 @@ export default function PlayerOverlay({
             chromeVisible ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
+          {item ? (
+            <IconButton
+              icon={<ListVideo size={18} />}
+              tooltip="Playlist (P)"
+              variant={showSidebar ? "primary" : "ghost"}
+              onClick={() => setShowSidebar((s) => !s)}
+            />
+          ) : null}
           <IconButton
             icon={<Keyboard size={18} />}
             tooltip="Keyboard shortcuts (?)"
@@ -558,6 +586,23 @@ export default function PlayerOverlay({
           </div>
         ) : null}
       </div>
+
+      {item ? (
+        <div
+          className={cn(
+            "absolute inset-y-0 right-0 z-10 w-80 max-w-[80vw] border-l border-(--color-border-subtle) shadow-(--shadow-card)",
+            "transition-transform duration-300",
+            showSidebar ? "translate-x-0" : "pointer-events-none translate-x-full",
+          )}
+        >
+          <PlayerSidebar
+            libraryId={item.libraryId}
+            currentGroupId={item.groupId}
+            currentItemId={current.itemId}
+            onSelect={handleSelectItem}
+          />
+        </div>
+      ) : null}
 
       <div
         onMouseEnter={() => {

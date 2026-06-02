@@ -127,3 +127,11 @@ export interface SearchResults {
   groups: Group[];
   items: ItemWithProgress[];
 }
+
+/** Every group and leaf item (with progress) in a library — powers the
+ *  in-player playlist. */
+export interface LibraryPlaylist {
+  library: Library;
+  groups: Group[];
+  items: ItemWithProgress[];
+}

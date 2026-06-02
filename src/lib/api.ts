@@ -9,6 +9,7 @@ import type {
     Library,
     LibraryContents,
     LibraryKind,
+    LibraryPlaylist,
     Note,
     NoteSavedEvent,
     ProgressUpdate,
@@ -44,6 +45,14 @@ export function getLibraryContents(
 
 export function getGroup(groupId: number): Promise<GroupDetail> {
     return invoke<GroupDetail>("get_group", { groupId });
+}
+
+/** All groups + items (with progress) in a library, in a fixed number of
+ *  queries. Used by the in-player playlist. */
+export function getLibraryPlaylist(
+    libraryId: number,
+): Promise<LibraryPlaylist> {
+    return invoke<LibraryPlaylist>("get_library_playlist", { libraryId });
 }
 
 export function getContinueWatching(

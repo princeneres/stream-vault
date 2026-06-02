@@ -182,3 +182,14 @@ pub struct SearchResults {
     pub groups: Vec<Group>,
     pub items: Vec<ItemWithProgress>,
 }
+
+/// Every group and every leaf item (with progress) in a library, fetched in a
+/// fixed number of queries. Powers the in-player playlist, which lets the user
+/// browse the whole library while watching.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylist {
+    pub library: Library,
+    pub groups: Vec<Group>,
+    pub items: Vec<ItemWithProgress>,
+}

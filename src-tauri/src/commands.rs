@@ -16,7 +16,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::db::Database;
 use crate::models::{
     Attachment, AttachmentKind, Group, GroupDetail, Item, ItemWithProgress, Library,
-    LibraryContents, LibraryKind, Note, ProgressUpdate, ScanResult, SearchResults,
+    LibraryContents, LibraryKind, LibraryPlaylist, Note, ProgressUpdate, ScanResult,
+    SearchResults,
 };
 use crate::{scanner, thumbnails};
 
@@ -262,6 +263,36 @@ pub fn get_library_contents(
         library,
         groups,
         top_items,
+    })
+}
+
+/// Every group and leaf item (with progress) in a library, fetched in a fixed
+/// number of queries regardless of size. Powers the in-player playlist.
+#[tauri::command]
+pub fn get_library_playlist(
+    db: State<'_, Database>,
+    library_id: i64,
+) -> CmdResult<LibraryPlaylist> {
+    let mut library = db
+        .get_library_by_id(library_id)
+        .map_err(cmd_err)?
+        .ok_or_else(|| format!("library {library_id} not found"))?;
+    library.available = Path::new(&library.root_path).is_dir();
+    let groups = db.list_groups_by_library(library_id).map_err(cmd_err)?;
+    let items_raw = db.list_items_by_library(library_id).map_err(cmd_err)?;
+    let item_ids: Vec<i64> = items_raw.iter().map(|i| i.id).collect();
+    let progress = db.map_progress_for_items(&item_ids).map_err(cmd_err)?;
+    let items: Vec<ItemWithProgress> = items_raw
+        .into_iter()
+        .map(|item| ItemWithProgress {
+            progress: progress.get(&item.id).cloned(),
+            item,
+        })
+        .collect();
+    Ok(LibraryPlaylist {
+        library,
+        groups,
+        items,
     })
 }
 
