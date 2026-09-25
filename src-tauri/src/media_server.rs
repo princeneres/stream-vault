@@ -7,12 +7,10 @@
 // (non-faststart). Over HTTP, WebKitGTK's GStreamer pipeline doesn't seek back
 // to read it and fails with MEDIA_ERR_SRC_NOT_SUPPORTED.
 //
-// So the `/stream` route remuxes on the fly with ffmpeg into a *fragmented*
-// MP4 (`empty_moov`), which is progressive and needs no trailing moov. `-c
-// copy` means no re-encode. Seeking/resume is done by restarting ffmpeg at an
-// `-ss <t>` offset; the frontend keeps a virtual timeline using the duration
-// from the DB (ffprobe). The `/file` route still serves raw bytes with range
-// support (used for faststart files / diagnostics).
+// So every request is served with byte-range support through `serve_file`,
+// which presents a faststart layout: for MP4s with a trailing moov, the header
+// is rebuilt in memory ahead of mdat, and mdat is streamed straight from disk.
+// No ffmpeg and no re-encode, so seeking and playbackRate stay native.
 //
 // Only files inside a configured library root are served (validated per
 // request against the DB), so this is not an arbitrary-file read endpoint.
