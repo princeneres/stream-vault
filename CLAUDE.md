@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-Local-first desktop app for watching any folder of videos in sequence — courses, series, talks, tutorials, anything — with progress tracking. Tauri shell, mpv as the player, SQLite for state. Scanner *presets* (`courses`/`series`/`movies`/`generic`) tune how a folder is read; `generic` is the default. Each library has an optional unit label ("lesson", "episode", "part", …).
+Local-first desktop app for watching any folder of videos in sequence — courses, series, talks, tutorials, anything — with progress tracking. Tauri shell, built-in HTML5 player fed by a localhost media server, SQLite for state. Scanner *presets* (`courses`/`series`/`movies`/`generic`) tune how a folder is read; `generic` is the default. Each library has an optional unit label ("lesson", "episode", "part", …).
 
 ## Stack
 
-Tauri 2 · React 18 · TypeScript · Vite · Tailwind · Rust · SQLite (`tauri-plugin-sql`) · external `mpv` + `ffmpeg` · pnpm · lucide-react
+Tauri 2 · React 19 · TypeScript · Vite · Tailwind 4 · Rust · SQLite (`rusqlite`, bundled) · `tiny_http` media server · external `ffmpeg`/`ffprobe` (+ optional `pdftoppm`) · pnpm · lucide-react
 
 ## Layout
 
@@ -19,8 +19,9 @@ src-tauri/src/
   models.rs           ⚠ Domain types — contract
   db.rs               Schema + query layer
   scanner/            One module per library kind: courses, series, movies, generic
-  mpv.rs              Spawn mpv + JSON IPC progress polling
-  thumbnails.rs       ffmpeg-based thumbnail/poster generation
+  media_server.rs     Localhost HTTP server the <video> element streams from
+  thumbnails.rs       ffmpeg thumbnails/posters, ffprobe durations
+  vault.rs            Obsidian vault publishing for notes
 ```
 
 ## Commands
@@ -35,7 +36,7 @@ cargo test                # in src-tauri/, run tests
 pnpm lint                 # frontend lint
 ```
 
-Runtime deps the app shells out to: `mpv`, `ffmpeg`, `ffprobe`. On Ubuntu: `sudo apt install mpv ffmpeg`.
+Runtime deps the app shells out to: `ffmpeg`, `ffprobe`, and optionally `pdftoppm` for PDF previews. On Ubuntu: `sudo apt install ffmpeg poppler-utils`.
 
 ## Domain model
 
@@ -53,16 +54,16 @@ The same schema fits all kinds. The scanner is what differs — see `src-tauri/s
 
 ## Playback flow
 
-`play_item(id)` → load item + current progress → spawn `mpv` with `--input-ipc-server=<socket>` and `--start=<resume>` → background task polls `time-pos` every 3s via JSON IPC → writes to `progress` table → emits `item-progress` event for live UI updates → on exit, final save and mark `completed` if past 90% of duration.
+`PlayerOverlay` calls `get_item` (item + saved progress) → `media_url` returns `http://127.0.0.1:<port>/file?path=…` (byte-range, served only for files inside a library root) → `<video>` seeks to the resume position → `report_progress` every 3s and on pause/close → backend writes `progress`, marks `completed` at ≥ 90% of duration and emits `item-progress` for live UI updates.
 
-Only one mpv instance at a time — a new `play_item` kills the previous session.
+`media_server.rs` serves a faststart view of MP4s with a trailing `moov` (header rebuilt in memory, `mdat` streamed from disk), because WebKitGTK won't seek back to read it over HTTP.
 
 ## Gotchas
 
 - **Re-scans must be incremental.** Match by `file_path`; preserve existing IDs and progress.
 - **Missing root folders** mark a library as `available: false` rather than crashing.
 - **Title cleaning matters.** Strip leading `01 -`, release tags, extensions. For series, parse `SxxExx` patterns.
-- **mpv/ffmpeg may be absent.** Detect `ErrorKind::NotFound`, surface a clear install hint, do not crash.
+- **ffmpeg/pdftoppm may be absent.** Detect `ErrorKind::NotFound`, surface a clear install hint, do not crash.
 - **Linux first.** Windows/macOS support is structured-for but not implemented in MVP.
 
 ## When in doubt
