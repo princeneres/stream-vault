@@ -57,6 +57,13 @@ pub fn run() {
 
             app.manage(db);
             app.manage(crate::media_server::MediaServer { port: media_port });
+
+            #[cfg(target_os = "linux")]
+            if is_tiling_compositor() {
+                for window in app.webview_windows().values() {
+                    let _ = window.set_decorations(false);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -89,4 +96,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Tiling compositors manage window placement themselves, so GTK's title bar
+/// only wastes space and its minimize/maximize buttons do nothing.
+#[cfg(target_os = "linux")]
+fn is_tiling_compositor() -> bool {
+    const TILING: [&str; 5] = ["hyprland", "sway", "niri", "river", "i3"];
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_lowercase();
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var_os("SWAYSOCK").is_some()
+        || desktop.split(':').any(|d| TILING.contains(&d))
 }
