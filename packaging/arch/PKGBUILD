@@ -1,0 +1,45 @@
+# Builds from the local checkout this PKGBUILD lives in.
+# Usage: cd packaging/arch && makepkg -si
+pkgname=stream-vault
+pkgver=0.5.0
+pkgrel=1
+pkgdesc="Local-first desktop app for watching folders of videos in sequence with progress tracking"
+arch=('x86_64')
+url="https://github.com/princeneres/stream-vault"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'ffmpeg')
+makedepends=('rust' 'cargo')
+optdepends=('poppler: PDF previews (pdftoppm)')
+options=('!lto' '!debug')
+
+_root="$startdir/../.."
+
+build() {
+  cd "$_root"
+  command -v pnpm >/dev/null || { echo "pnpm not found in PATH" >&2; return 1; }
+  pnpm install --frozen-lockfile
+  pnpm tauri build --no-bundle
+}
+
+package() {
+  cd "$_root/src-tauri"
+  install -Dm755 target/release/stream-vault "$pkgdir/usr/bin/stream-vault"
+
+  install -Dm644 icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/stream-vault.png"
+  install -Dm644 icons/64x64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/stream-vault.png"
+  install -Dm644 icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/stream-vault.png"
+  install -Dm644 icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/stream-vault.png"
+  install -Dm644 metainfo/app.streamvault.dev.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/app.streamvault.dev.metainfo.xml"
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/Stream Vault.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Stream Vault
+Comment=$pkgdesc
+Exec=stream-vault
+Icon=stream-vault
+Terminal=false
+Categories=AudioVideo;Video;
+DESKTOP
+}
